@@ -1,50 +1,48 @@
 #include "levi/minecraft/ItemRenderer.hpp"
 
 #include "levi/core/Logger.hpp"
-#include "levi/memory/VTable.hpp"
 
 namespace levi::minecraft {
 
 bool ItemRenderer::attach(
-    void* renderer
+    std::uintptr_t target
 ) noexcept {
-    if (renderer == nullptr) {
+
+    if (target == 0) {
+        levi::core::Logger::error(
+            "ItemRenderer: invalid render target"
+        );
+
         return false;
     }
 
     if (attached_) {
-        return renderer_ == renderer;
+        return target_ == target;
     }
 
-    void* original = nullptr;
-
-    const bool success =
-        levi::memory::VTable::replace(
-            renderer,
-            kRenderFirstPersonIndex,
+    hook_ =
+        levi::memory::Hook(
+            target,
             reinterpret_cast<void*>(
                 &ItemRenderer::hookRenderFirstPerson
-            ),
-            &original
+            )
         );
 
-    if (!success || original == nullptr) {
+    if (!hook_.install()) {
         levi::core::Logger::error(
-            "ItemRenderer: failed to hook "
-            "vtable[%zu]",
-            kRenderFirstPersonIndex
+            "ItemRenderer: ARM64 hook installation failed"
         );
 
         return false;
     }
 
-    renderer_ = renderer;
-    originalRenderFirstPerson_ = original;
+    target_ = target;
     attached_ = true;
 
     levi::core::Logger::info(
-        "ItemRenderer: attached at vtable[%zu]",
-        kRenderFirstPersonIndex
+        "ItemRenderer: native renderFirstPerson hook active "
+        "target=%p",
+        reinterpret_cast<void*>(target_)
     );
 
     return true;
@@ -55,41 +53,24 @@ bool ItemRenderer::detach() noexcept {
         return true;
     }
 
-    if (
-        renderer_ == nullptr ||
-        originalRenderFirstPerson_ == nullptr
-    ) {
-        attached_ = false;
-        renderer_ = nullptr;
-        originalRenderFirstPerson_ = nullptr;
-
-        return true;
-    }
-
-    const bool restored =
-        levi::memory::VTable::restore(
-            renderer_,
-            kRenderFirstPersonIndex,
-            originalRenderFirstPerson_
-        );
-
-    if (!restored) {
+    if (!hook_.remove()) {
         return false;
     }
 
-    renderer_ = nullptr;
-    originalRenderFirstPerson_ = nullptr;
+    target_ = 0;
     attached_ = false;
 
     return true;
 }
 
 bool ItemRenderer::attached() noexcept {
-    return attached_;
+    return attached_ &&
+           hook_.installed();
 }
 
-void* ItemRenderer::renderer() noexcept {
-    return renderer_;
+std::uintptr_t
+ItemRenderer::target() noexcept {
+    return target_;
 }
 
 void ItemRenderer::setViewModelEnabled(
@@ -113,32 +94,35 @@ ItemRenderer::viewModelTransform() noexcept {
     return viewModelTransform_;
 }
 
+void* ItemRenderer::original() noexcept {
+    return hook_.original();
+}
+
 void ItemRenderer::hookRenderFirstPerson(
     void* self,
     RenderContext* context,
     MatrixStack* matrixStack
 ) noexcept {
+
     const auto original =
-        originalRenderFirstPerson_;
+        reinterpret_cast<RenderFirstPersonFn>(
+            hook_.original()
+        );
 
     if (original == nullptr) {
         return;
     }
 
-    const auto fn =
-        reinterpret_cast<RenderFirstPersonFn>(
-            original
-        );
-
     /*
-     * No MatrixStack => absolutely no modification.
+     * Never touch the native stack if the MatrixStack
+     * object was not supplied by Minecraft.
      */
     if (
         !viewModelEnabled_ ||
         matrixStack == nullptr ||
         !matrixStack->valid()
     ) {
-        fn(
+        original(
             self,
             context,
             matrixStack
@@ -147,13 +131,27 @@ void ItemRenderer::hookRenderFirstPerson(
         return;
     }
 
+    /*
+     * Critical invariant:
+     *
+     *       push
+     *          ↓
+     *      ViewModel
+     *          ↓
+     *      vanilla render
+     *          ↓
+     *        pop
+     *
+     * This prevents ViewModel from leaking its transform
+     * into subsequent rendering.
+     */
     matrixStack->push();
 
     matrixStack->apply(
         viewModelTransform_
     );
 
-    fn(
+    original(
         self,
         context,
         matrixStack
