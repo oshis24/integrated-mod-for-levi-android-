@@ -3,27 +3,36 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <vector>
 
 namespace levi::memory {
 
-struct Pattern {
-    const char* bytes;
-    const char* mask;
-    std::size_t size;
+class Pattern final {
+public:
+    Pattern() = default;
+
+    explicit Pattern(
+        std::string_view pattern
+    );
+
+    bool valid() const noexcept;
+
+    std::size_t size() const noexcept;
+
+    bool matches(
+        const std::uint8_t* address
+    ) const noexcept;
+
+private:
+    std::vector<std::uint8_t> bytes_;
+    std::vector<bool> mask_;
+
+public:
+    const std::vector<std::uint8_t>& bytes()
+        const noexcept;
+
+    const std::vector<bool>& mask()
+        const noexcept;
 };
-
-Pattern parsePattern(std::string_view pattern);
-
-uintptr_t findPattern(
-    uintptr_t start,
-    std::size_t size,
-    const Pattern& pattern
-);
-
-uintptr_t findPattern(
-    uintptr_t start,
-    std::size_t size,
-    std::string_view pattern
-);
 
 } // namespace levi::memory
