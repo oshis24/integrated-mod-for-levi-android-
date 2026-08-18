@@ -2,12 +2,15 @@
 
 #include "levi/core/Logger.hpp"
 #include "levi/core/Runtime.hpp"
+#include "levi/core/State.hpp"
 
 namespace levi::modules {
 
 bool ItemPhysics::initialize() noexcept {
-    if (status_ != ModuleStatus::Disabled &&
-        status_ != ModuleStatus::Failed) {
+    if (
+        status_ != ModuleStatus::Disabled &&
+        status_ != ModuleStatus::Failed
+    ) {
         return true;
     }
 
@@ -15,44 +18,34 @@ bool ItemPhysics::initialize() noexcept {
         levi::core::Runtime::instance();
 
     if (!runtime.isInitialized()) {
-        status_ = ModuleStatus::WaitingForRuntime;
+        status_ =
+            ModuleStatus::WaitingForRuntime;
 
-        levi::core::Logger::debug(
-            "ItemPhysics: runtime is not initialized"
-        );
+        return false;
+    }
+
+    if (
+        !runtime.isSupportedMinecraftVersion()
+    ) {
+        status_ =
+            ModuleStatus::Failed;
 
         return false;
     }
 
     /*
-     * The final implementation will not simply rotate every
-     * dropped item by a fixed amount.
+     * Unlike the reference ItemPhysics implementation,
+     * we don't modify every item identically.
      *
-     * The RE target must allow us to distinguish:
-     *
-     *   - item entity creation
-     *   - item entity render
-     *   - item stack/count
-     *   - item/block visual representation
-     *   - rotation state
-     *
-     * This is particularly important for:
-     *
-     *   - shields
-     *   - banners
-     *   - block items
-     *   - tools
-     *   - generated/3D item models
-     *
-     * so that the result does not inherit the bugs of the
-     * reference ItemPhysics implementation.
+     * The renderer will classify the visual representation
+     * first, then request the appropriate transform.
      */
 
-    status_ = ModuleStatus::WaitingForTarget;
+    status_ =
+        ModuleStatus::Ready;
 
     levi::core::Logger::info(
-        "ItemPhysics initialized; "
-        "waiting for native target"
+        "ItemPhysics initialized"
     );
 
     return true;
@@ -61,53 +54,35 @@ bool ItemPhysics::initialize() noexcept {
 void ItemPhysics::shutdown() noexcept {
     disable();
 
-    status_ = ModuleStatus::Disabled;
+    status_ =
+        ModuleStatus::Disabled;
 }
 
-void ItemPhysics::tick(float deltaTime) noexcept {
+void ItemPhysics::tick(
+    float deltaTime
+) noexcept {
     (void)deltaTime;
-
-    if (!enabled_) {
-        return;
-    }
-
-    /*
-     * Item physics should eventually be evaluated from the
-     * actual entity/render state rather than from the frame
-     * counter alone.
-     *
-     * Desired behavior:
-     *
-     *   dropped item
-     *       ↓
-     *   identify visual/model
-     *       ↓
-     *   preserve vanilla position/scale
-     *       ↓
-     *   replace unwanted spin
-     *       ↓
-     *   apply stable orientation
-     */
-
-    // Native implementation pending RE profile.
 }
 
 bool ItemPhysics::enable() noexcept {
-    if (status_ == ModuleStatus::Failed) {
-        return false;
-    }
-
-    if (status_ == ModuleStatus::WaitingForTarget) {
-        levi::core::Logger::warning(
-            "ItemPhysics cannot be enabled: "
-            "native target is not verified"
-        );
-
+    if (
+        status_ != ModuleStatus::Ready &&
+        status_ != ModuleStatus::Active
+    ) {
         return false;
     }
 
     enabled_ = true;
-    status_ = ModuleStatus::Active;
+
+    levi::core::State::instance()
+        .setItemPhysicsEnabled(true);
+
+    status_ =
+        ModuleStatus::Active;
+
+    levi::core::Logger::info(
+        "ItemPhysics enabled"
+    );
 
     return true;
 }
@@ -115,8 +90,14 @@ bool ItemPhysics::enable() noexcept {
 void ItemPhysics::disable() noexcept {
     enabled_ = false;
 
-    if (status_ == ModuleStatus::Active) {
-        status_ = ModuleStatus::Ready;
+    levi::core::State::instance()
+        .setItemPhysicsEnabled(false);
+
+    if (
+        status_ == ModuleStatus::Active
+    ) {
+        status_ =
+            ModuleStatus::Ready;
     }
 }
 
@@ -126,6 +107,63 @@ bool ItemPhysics::enabled() const noexcept {
 
 ModuleStatus ItemPhysics::status() const noexcept {
     return status_;
+}
+
+ItemPhysicsTransform
+ItemPhysics::transformFor(
+    ItemVisualType type
+) const noexcept {
+    ItemPhysicsTransform result;
+
+    result.visualType = type;
+
+    /*
+     * The important part here is that we DON'T use a universal
+     * 90-degree correction.
+     *
+     * The broken reference mod effectively does that for a
+     * number of representations, which is why some items look
+     * horizontal while others continue spinning.
+     */
+
+    switch (type) {
+        case ItemVisualType::Shield:
+            result.transform.rotation = {
+                0.0f,
+                0.0f,
+                0.0f
+            };
+            break;
+
+        case ItemVisualType::Banner:
+            result.transform.rotation = {
+                0.0f,
+                0.0f,
+                0.0f
+            };
+            break;
+
+        case ItemVisualType::BlockItem:
+            result.transform.rotation = {
+                0.0f,
+                0.0f,
+                0.0f
+            };
+            break;
+
+        case ItemVisualType::Tool:
+        case ItemVisualType::Weapon:
+        case ItemVisualType::FlatItem:
+        case ItemVisualType::Unknown:
+            result.transform.rotation = {
+                0.0f,
+                0.0f,
+                0.0f
+            };
+            break;
+    }
+
+    return result;
 }
 
 } // namespace levi::modules
