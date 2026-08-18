@@ -55,12 +55,40 @@ public:
         ItemVisualType type
     ) const noexcept;
 
+    /*
+     * Native targets resolved from MinecraftProfile.
+     *
+     * These are FUNCTION addresses inside
+     * libminecraftpe.so.
+     *
+     * They are NOT object pointers.
+     */
+    void bindNativeTargets(
+        std::uintptr_t setupAndRender,
+        std::uintptr_t renderItemGroup
+    ) noexcept;
+
+    std::uintptr_t setupAndRenderTarget()
+        const noexcept;
+
+    std::uintptr_t renderItemGroupTarget()
+        const noexcept;
+
+    bool nativeTargetsResolved()
+        const noexcept;
+
 private:
     bool enabled_{false};
 
     ModuleStatus status_{
         ModuleStatus::Disabled
     };
+
+    std::uintptr_t
+        setupAndRenderTarget_{0};
+
+    std::uintptr_t
+        renderItemGroupTarget_{0};
 };
 
 } // namespace levi::modules
