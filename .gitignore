@@ -1,0 +1,34 @@
+# Android / CMake
+build/
+.cxx/
+.externalNativeBuild/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Native binaries
+*.so
+*.o
+*.a
+
+# Generated packages
+*.levipack
+*.zip
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+.cache/
+
+# Local configuration
+local.properties
+.env
+
+# OS
+.DS_Store
+Thumbs.db
