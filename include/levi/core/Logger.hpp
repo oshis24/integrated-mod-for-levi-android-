@@ -1,9 +1,30 @@
 #pragma once
 
-namespace levi::Logger {
+namespace levi::core {
 
-void info(const char* fmt, ...);
-void warn(const char* fmt, ...);
-void error(const char* fmt, ...);
+class Logger final {
+public:
+    static void initialize() noexcept;
 
-} // namespace levi::Logger
+    static void debug(
+        const char* fmt,
+        ...
+    ) noexcept;
+
+    static void info(
+        const char* fmt,
+        ...
+    ) noexcept;
+
+    static void warning(
+        const char* fmt,
+        ...
+    ) noexcept;
+
+    static void error(
+        const char* fmt,
+        ...
+    ) noexcept;
+};
+
+} // namespace levi::core
