@@ -1,6 +1,5 @@
 #pragma once
 
-#include "levi/math/Transform.hpp"
 #include "levi/minecraft/MatrixStack.hpp"
 #include "levi/minecraft/RenderContext.hpp"
 
@@ -11,106 +10,67 @@ namespace levi::minecraft {
 class ItemRenderer final {
 public:
     /*
-     * The callback signatures are intentionally kept as the
-     * render-boundary ABI used by the Levi bridge.
+     * ARM64 ABI:
      *
-     * The object itself is still opaque.
+     * x0 = ItemInHandRenderer*
+     * x1 = RenderContext*
+     * x2 = MatrixStack*
+     *
+     * The remaining arguments are intentionally kept opaque
+     * until the native render boundary supplies them.
      */
-
     using RenderFirstPersonFn = void(*)(
-        void* self,
-        RenderContext* context,
-        MatrixStack* matrixStack,
-        float partialTick
-    );
-
-    using RenderItemFn = void(*)(
-        void* self,
-        RenderContext* context,
-        MatrixStack* matrixStack,
-        std::int32_t itemId,
-        float partialTick
-    );
-
-    using RenderObjectFn = void(*)(
-        void* self,
-        RenderContext* context,
-        MatrixStack* matrixStack,
-        std::int32_t objectId,
-        float partialTick
+        void*,
+        RenderContext*,
+        MatrixStack*
     );
 
 public:
-    ItemRenderer() = default;
-
-    explicit ItemRenderer(
-        std::uintptr_t address
-    )
-        : address_(address) {
-    }
-
-    bool valid() const noexcept {
-        return address_ != 0;
-    }
-
-    std::uintptr_t address() const noexcept {
-        return address_;
-    }
-
-    static void bind(
-        RenderFirstPersonFn firstPerson,
-        RenderItemFn renderItem,
-        RenderObjectFn renderObject
+    static bool attach(
+        void* renderer
     ) noexcept;
 
-    static bool bound() noexcept;
+    static bool detach() noexcept;
 
-    static RenderFirstPersonFn
-    originalFirstPerson() noexcept;
+    static bool attached() noexcept;
 
-    static RenderItemFn
-    originalRenderItem() noexcept;
-
-    static RenderObjectFn
-    originalRenderObject() noexcept;
-
-    /*
-     * These functions are called by the module hooks.
-     */
-    static void renderFirstPerson(
-        void* self,
-        RenderContext* context,
-        MatrixStack* matrixStack,
-        float partialTick
+    static void applyViewModel(
+        MatrixStack* matrixStack
     ) noexcept;
 
-    static void renderItem(
-        void* self,
-        RenderContext* context,
-        MatrixStack* matrixStack,
-        std::int32_t itemId,
-        float partialTick
+    static void setViewModelEnabled(
+        bool enabled
     ) noexcept;
 
-    static void renderObject(
+    static void setViewModelTransform(
+        const levi::math::Transform& transform
+    ) noexcept;
+
+    static const levi::math::Transform&
+    viewModelTransform() noexcept;
+
+    static void* renderer() noexcept;
+
+private:
+    static void hookRenderFirstPerson(
         void* self,
         RenderContext* context,
-        MatrixStack* matrixStack,
-        std::int32_t objectId,
-        float partialTick
+        MatrixStack* matrixStack
     ) noexcept;
 
 private:
-    std::uintptr_t address_{0};
+    inline static void* renderer_{nullptr};
 
-    inline static RenderFirstPersonFn
-        firstPersonFn_{nullptr};
+    inline static void* originalRenderFirstPerson_{
+        nullptr
+    };
 
-    inline static RenderItemFn
-        renderItemFn_{nullptr};
+    inline static bool attached_{false};
 
-    inline static RenderObjectFn
-        renderObjectFn_{nullptr};
+    inline static bool viewModelEnabled_{false};
+
+    inline static levi::math::Transform
+        viewModelTransform_{};
 };
 
 } // namespace levi::minecraft
