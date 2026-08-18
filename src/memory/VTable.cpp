@@ -4,42 +4,48 @@
 #include <unistd.h>
 
 #include <cstdint>
-#include <cstring>
 
 namespace levi::memory {
 
 namespace {
 
-bool makeWritable(
+bool changeProtection(
     void* address,
-    std::size_t size
+    std::size_t size,
+    int protection
 ) noexcept {
     if (address == nullptr || size == 0) {
         return false;
     }
 
-    const long pageSize = sysconf(_SC_PAGESIZE);
+    const long pageSize =
+        sysconf(_SC_PAGESIZE);
 
     if (pageSize <= 0) {
         return false;
     }
 
-    const auto addressValue =
-        reinterpret_cast<std::uintptr_t>(address);
+    const auto page =
+        static_cast<std::uintptr_t>(
+            pageSize
+        );
 
-    const auto pageMask =
-        static_cast<std::uintptr_t>(pageSize - 1);
+    const auto value =
+        reinterpret_cast<std::uintptr_t>(
+            address
+        );
 
-    const auto pageStart =
-        addressValue & ~pageMask;
+    const auto begin =
+        value & ~(page - 1);
 
-    const auto pageEnd =
-        (addressValue + size + pageMask) & ~pageMask;
+    const auto end =
+        (value + size + page - 1) &
+        ~(page - 1);
 
     return mprotect(
-        reinterpret_cast<void*>(pageStart),
-        pageEnd - pageStart,
-        PROT_READ | PROT_WRITE
+        reinterpret_cast<void*>(begin),
+        end - begin,
+        protection
     ) == 0;
 }
 
@@ -49,19 +55,18 @@ void* VTable::get(
     void* object,
     std::size_t index
 ) noexcept {
-
     if (object == nullptr) {
         return nullptr;
     }
 
-    auto*** objectAsTable =
+    auto*** table =
         reinterpret_cast<void***>(object);
 
-    if (*objectAsTable == nullptr) {
+    if (table == nullptr || *table == nullptr) {
         return nullptr;
     }
 
-    return (*objectAsTable)[index];
+    return (*table)[index];
 }
 
 bool VTable::replace(
@@ -70,40 +75,40 @@ bool VTable::replace(
     void* replacement,
     void** original
 ) noexcept {
-
-    if (object == nullptr ||
-        replacement == nullptr) {
+    if (
+        object == nullptr ||
+        replacement == nullptr
+    ) {
         return false;
     }
 
-    auto*** objectAsTable =
+    auto*** objectTable =
         reinterpret_cast<void***>(object);
 
-    if (*objectAsTable == nullptr) {
+    if (
+        objectTable == nullptr ||
+        *objectTable == nullptr
+    ) {
         return false;
     }
 
-    void** table = *objectAsTable;
+    void** table = *objectTable;
 
-    void* oldFunction = table[index];
+    void* old = table[index];
 
-    if (original != nullptr) {
-        *original = oldFunction;
+    if (old == nullptr) {
+        return false;
     }
 
-    /*
-     * IMPORTANT:
-     *
-     * This is intentionally a primitive VTable operation.
-     * It is NOT yet the final LeviLaunchroid hook mechanism.
-     *
-     * For VanillaCameraAPI::vtable[7], we will eventually
-     * use the launcher/preloader-safe hook layer if available.
-     */
+    if (original != nullptr) {
+        *original = old;
+    }
 
-    if (!makeWritable(
+    if (!changeProtection(
             &table[index],
-            sizeof(void*))) {
+            sizeof(void*),
+            PROT_READ | PROT_WRITE
+        )) {
         return false;
     }
 
@@ -113,6 +118,67 @@ bool VTable::replace(
         reinterpret_cast<char*>(&table[index]),
         reinterpret_cast<char*>(&table[index]) +
             sizeof(void*)
+    );
+
+    /*
+     * Restore read-only protection.
+     *
+     * This is important because leaving Minecraft's vtable
+     * writable is unnecessary and dangerous.
+     */
+    changeProtection(
+        &table[index],
+        sizeof(void*),
+        PROT_READ
+    );
+
+    return true;
+}
+
+bool VTable::restore(
+    void* object,
+    std::size_t index,
+    void* original
+) noexcept {
+    if (
+        object == nullptr ||
+        original == nullptr
+    ) {
+        return false;
+    }
+
+    auto*** objectTable =
+        reinterpret_cast<void***>(object);
+
+    if (
+        objectTable == nullptr ||
+        *objectTable == nullptr
+    ) {
+        return false;
+    }
+
+    void** table = *objectTable;
+
+    if (!changeProtection(
+            &table[index],
+            sizeof(void*),
+            PROT_READ | PROT_WRITE
+        )) {
+        return false;
+    }
+
+    table[index] = original;
+
+    __builtin___clear_cache(
+        reinterpret_cast<char*>(&table[index]),
+        reinterpret_cast<char*>(&table[index]) +
+            sizeof(void*)
+    );
+
+    changeProtection(
+        &table[index],
+        sizeof(void*),
+        PROT_READ
     );
 
     return true;
