@@ -2,11 +2,7 @@
 
 #include "levi/core/Logger.hpp"
 #include "levi/core/State.hpp"
-
-#include <cstdio>
-#include <cstring>
-
-#include <dlfcn.h>
+#include "levi/minecraft/MinecraftProfile.hpp"
 
 namespace levi::core {
 
@@ -31,17 +27,17 @@ bool Runtime::initialize() {
         minecraftVersion_.c_str()
     );
 
-    /*
-     * Do not resolve Minecraft symbols here yet.
-     *
-     * Native target resolution will be handled by the
-     * memory/profile layer after the library is loaded.
-     */
-
     initialized_ = true;
 
-    State::instance().setInitialized(true);
+    State::instance()
+        .setInitialized(true);
 
+    /*
+     * We don't resolve before Minecraft's native library
+     * exists in the process.
+     *
+     * The profile can therefore be retried on later ticks.
+     */
     Logger::info(
         "Runtime initialized"
     );
@@ -58,15 +54,13 @@ void Runtime::shutdown() {
         "Shutting down LeviModules runtime"
     );
 
-    State::instance().setShuttingDown(true);
-
-    /*
-     * Hook removal will be implemented by HookManager.
-     */
+    State::instance()
+        .setShuttingDown(true);
 
     initialized_ = false;
 
-    State::instance().setInitialized(false);
+    State::instance()
+        .setInitialized(false);
 
     Logger::info(
         "Runtime shutdown complete"
@@ -80,37 +74,36 @@ bool Runtime::isInitialized() const noexcept {
 std::uintptr_t Runtime::findLibrary(
     const char* libraryName
 ) const noexcept {
-
-    if (libraryName == nullptr || libraryName[0] == '\0') {
+    if (
+        libraryName == nullptr ||
+        libraryName[0] == '\0'
+    ) {
         return 0;
     }
 
-    void* handle = dlopen(
-        libraryName,
-        RTLD_NOW | RTLD_NOLOAD
-    );
+    levi::memory::MemoryRange range;
 
-    if (handle == nullptr) {
-        return 0;
+    if (
+        levi::memory::PatternScanner::findTextRange(
+            libraryName,
+            range
+        )
+    ) {
+        return range.start;
     }
-
-    /*
-     * dlsym(handle, nullptr) is not portable for retrieving
-     * the module base. The actual ELF base resolver will be
-     * implemented by PatternScanner using /proc/self/maps.
-     */
-
-    dlclose(handle);
 
     return 0;
 }
 
-const std::string& Runtime::minecraftVersion() const noexcept {
+const std::string&
+Runtime::minecraftVersion() const noexcept {
     return minecraftVersion_;
 }
 
-bool Runtime::isSupportedMinecraftVersion() const noexcept {
-    return minecraftVersion_ == "1.26.44.3";
+bool Runtime::isSupportedMinecraftVersion()
+    const noexcept {
+    return minecraftVersion_ ==
+        "1.26.44.3";
 }
 
 } // namespace levi::core
