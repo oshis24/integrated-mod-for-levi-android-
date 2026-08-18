@@ -21,6 +21,13 @@ add_library(${LEVI_TARGET} SHARED
     src/memory/Hook.cpp
     src/memory/VTable.cpp
 
+    src/minecraft/Camera.cpp
+    src/minecraft/ClientInstance.cpp
+    src/minecraft/ItemEntity.cpp
+    src/minecraft/ItemRenderer.cpp
+    src/minecraft/MatrixStack.cpp
+    src/minecraft/RenderContext.cpp
+
     src/modules/ViewModel.cpp
     src/modules/Freelook.cpp
     src/modules/ItemPhysics.cpp
