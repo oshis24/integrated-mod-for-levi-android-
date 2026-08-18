@@ -23,6 +23,7 @@ add_library(${LEVI_TARGET} SHARED
 
     src/minecraft/Camera.cpp
     src/minecraft/ClientInstance.cpp
+    src/minecraft/MinecraftProfile.cpp
     src/minecraft/ItemEntity.cpp
     src/minecraft/ItemRenderer.cpp
     src/minecraft/MatrixStack.cpp
