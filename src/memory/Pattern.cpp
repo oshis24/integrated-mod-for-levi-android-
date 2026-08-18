@@ -1,4 +1,4 @@
-#include "memory/Pattern.h"
+#include "memory/Pattern.hpp"
 
 #include <cctype>
 #include <cstdlib>
