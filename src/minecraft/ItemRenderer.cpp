@@ -1,100 +1,181 @@
 #include "levi/minecraft/ItemRenderer.hpp"
 
 #include "levi/core/Logger.hpp"
+#include "levi/memory/VTable.hpp"
 
 namespace levi::minecraft {
 
-void ItemRenderer::bind(
-    RenderFirstPersonFn firstPerson,
-    RenderItemFn renderItem,
-    RenderObjectFn renderObject
+namespace {
+
+/*
+ * From the previously reconstructed ItemInHandRenderer
+ * vtable path:
+ *
+ *     vtable + 0x18
+ *
+ * therefore:
+ *
+ *     0x18 / sizeof(void*) = 3
+ */
+constexpr std::size_t kRenderFirstPersonVTableIndex = 3;
+
+} // namespace
+
+bool ItemRenderer::attach(
+    void* renderer
 ) noexcept {
-    firstPersonFn_ = firstPerson;
-    renderItemFn_ = renderItem;
-    renderObjectFn_ = renderObject;
+    if (renderer == nullptr) {
+        return false;
+    }
+
+    if (attached_) {
+        return renderer_ == renderer;
+    }
+
+    void* original = nullptr;
+
+    const bool replaced =
+        levi::memory::VTable::replace(
+            renderer,
+            kRenderFirstPersonVTableIndex,
+            reinterpret_cast<void*>(
+                &ItemRenderer::hookRenderFirstPerson
+            ),
+            &original
+        );
+
+    if (!replaced || original == nullptr) {
+        levi::core::Logger::error(
+            "ItemRenderer: vtable hook failed"
+        );
+
+        return false;
+    }
+
+    renderer_ = renderer;
+    originalRenderFirstPerson_ = original;
+    attached_ = true;
 
     levi::core::Logger::info(
-        "ItemRenderer render bridge bound"
+        "ItemRenderer: renderFirstPerson hook attached"
     );
+
+    return true;
 }
 
-bool ItemRenderer::bound() noexcept {
-    return
-        firstPersonFn_ != nullptr &&
-        renderItemFn_ != nullptr &&
-        renderObjectFn_ != nullptr;
+bool ItemRenderer::detach() noexcept {
+    /*
+     * VTable::replace() currently does not retain enough
+     * information to restore the original table entry safely.
+     *
+     * Therefore we deliberately do not pretend that detach
+     * is supported yet.
+     *
+     * Runtime shutdown must keep the native object alive until
+     * the owning renderer is destroyed.
+     */
+    return !attached_;
 }
 
-ItemRenderer::RenderFirstPersonFn
-ItemRenderer::originalFirstPerson() noexcept {
-    return firstPersonFn_;
+bool ItemRenderer::attached() noexcept {
+    return attached_;
 }
 
-ItemRenderer::RenderItemFn
-ItemRenderer::originalRenderItem() noexcept {
-    return renderItemFn_;
-}
-
-ItemRenderer::RenderObjectFn
-ItemRenderer::originalRenderObject() noexcept {
-    return renderObjectFn_;
-}
-
-void ItemRenderer::renderFirstPerson(
-    void* self,
-    RenderContext* context,
-    MatrixStack* matrixStack,
-    float partialTick
+void ItemRenderer::setViewModelEnabled(
+    bool enabled
 ) noexcept {
-    if (firstPersonFn_ == nullptr) {
+    viewModelEnabled_ = enabled;
+}
+
+void ItemRenderer::setViewModelTransform(
+    const levi::math::Transform& transform
+) noexcept {
+    viewModelTransform_ = transform;
+}
+
+const levi::math::Transform&
+ItemRenderer::viewModelTransform() noexcept {
+    return viewModelTransform_;
+}
+
+void* ItemRenderer::renderer() noexcept {
+    return renderer_;
+}
+
+void ItemRenderer::applyViewModel(
+    MatrixStack* matrixStack
+) noexcept {
+    if (
+        !viewModelEnabled_ ||
+        matrixStack == nullptr ||
+        !matrixStack->valid()
+    ) {
         return;
     }
 
-    firstPersonFn_(
-        self,
-        context,
-        matrixStack,
-        partialTick
+    matrixStack->apply(
+        viewModelTransform_
     );
 }
 
-void ItemRenderer::renderItem(
+void ItemRenderer::hookRenderFirstPerson(
     void* self,
     RenderContext* context,
-    MatrixStack* matrixStack,
-    std::int32_t itemId,
-    float partialTick
+    MatrixStack* matrixStack
 ) noexcept {
-    if (renderItemFn_ == nullptr) {
+    if (
+        originalRenderFirstPerson_ == nullptr
+    ) {
         return;
     }
 
-    renderItemFn_(
-        self,
-        context,
-        matrixStack,
-        itemId,
-        partialTick
-    );
-}
+    /*
+     * Important:
+     *
+     * The transform is isolated to this render invocation.
+     *
+     *     push
+     *       ↓
+     *     ViewModel transform
+     *       ↓
+     *     vanilla render
+     *       ↓
+     *     pop
+     */
+    if (
+        viewModelEnabled_ &&
+        matrixStack != nullptr &&
+        matrixStack->valid()
+    ) {
+        matrixStack->push();
 
-void ItemRenderer::renderObject(
-    void* self,
-    RenderContext* context,
-    MatrixStack* matrixStack,
-    std::int32_t objectId,
-    float partialTick
-) noexcept {
-    if (renderObjectFn_ == nullptr) {
+        applyViewModel(
+            matrixStack
+        );
+
+        reinterpret_cast<
+            RenderFirstPersonFn
+        >(
+            originalRenderFirstPerson_
+        )(
+            self,
+            context,
+            matrixStack
+        );
+
+        matrixStack->pop();
+
         return;
     }
 
-    renderObjectFn_(
+    reinterpret_cast<
+        RenderFirstPersonFn
+    >(
+        originalRenderFirstPerson_
+    )(
         self,
         context,
-        matrixStack,
-        objectId,
-        partialTick
+        matrixStack
     );
 }
 
