@@ -1,0 +1,31 @@
+{
+    "format_version": 1,
+    "name": "LeviModules",
+    "id": "levi.modules",
+    "version": "0.1.0",
+    "description": "ViewModel, Freelook and Item Physics for LeviLauncher.",
+    "author": "LeviModules",
+    "minecraft_versions": [
+        "1.26.44.3"
+    ],
+    "platform": "android",
+    "architecture": "arm64-v8a",
+    "library": "libminecraft.so",
+    "modules": [
+        {
+            "id": "viewmodel",
+            "name": "ViewModel",
+            "enabled": true
+        },
+        {
+            "id": "freelook",
+            "name": "Freelook",
+            "enabled": true
+        },
+        {
+            "id": "itemphysics",
+            "name": "Item Physics",
+            "enabled": true
+        }
+    ]
+}
