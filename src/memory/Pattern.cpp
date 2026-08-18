@@ -1,111 +1,152 @@
-#include "levi/memory/Pattern.hpp"
+#include "memory/Pattern.h"
 
 #include <cctype>
 #include <cstdlib>
-#include <sstream>
-#include <string>
 #include <vector>
 
 namespace levi::memory {
 
-namespace {
+Pattern parsePattern(std::string_view pattern) {
+    static thread_local std::vector<char> bytes;
+    static thread_local std::vector<char> mask;
 
-bool parseByte(
-    const std::string& token,
-    std::uint8_t& value,
-    bool& wildcard
-) {
-    if (token == "?" || token == "??") {
-        value = 0;
-        wildcard = true;
-        return true;
-    }
+    bytes.clear();
+    mask.clear();
 
-    if (token.size() != 2) {
-        return false;
-    }
+    std::size_t i = 0;
 
-    const char* begin = token.data();
-    char* end = nullptr;
-
-    const unsigned long parsed =
-        std::strtoul(begin, &end, 16);
-
-    if (end != begin + 2 || parsed > 0xFF) {
-        return false;
-    }
-
-    value = static_cast<std::uint8_t>(parsed);
-    wildcard = false;
-
-    return true;
-}
-
-} // namespace
-
-Pattern::Pattern(const char* pattern) {
-    if (pattern == nullptr) {
-        return;
-    }
-
-    std::istringstream stream(pattern);
-    std::string token;
-
-    while (stream >> token) {
-        std::uint8_t value = 0;
-        bool wildcard = false;
-
-        if (!parseByte(token, value, wildcard)) {
-            bytes_.clear();
-            mask_.clear();
-            return;
+    while (i < pattern.size()) {
+        while (i < pattern.size() &&
+               std::isspace(
+                   static_cast<unsigned char>(pattern[i])
+               )) {
+            ++i;
         }
 
-        bytes_.push_back(value);
-        mask_.push_back(!wildcard);
-    }
-}
+        if (i >= pattern.size()) {
+            break;
+        }
 
-Pattern::Pattern(const std::string& pattern)
-    : Pattern(pattern.c_str()) {
-}
+        if (pattern[i] == '?') {
+            bytes.push_back(0);
+            mask.push_back('?');
 
-bool Pattern::valid() const noexcept {
-    return !bytes_.empty() &&
-           bytes_.size() == mask_.size();
-}
+            ++i;
 
-const std::vector<std::uint8_t>& Pattern::bytes() const noexcept {
-    return bytes_;
-}
+            if (i < pattern.size() &&
+                pattern[i] == '?') {
+                ++i;
+            }
 
-const std::vector<bool>& Pattern::mask() const noexcept {
-    return mask_;
-}
-
-std::size_t Pattern::size() const noexcept {
-    return bytes_.size();
-}
-
-bool Pattern::matches(
-    const std::uint8_t* address
-) const noexcept {
-
-    if (!valid() || address == nullptr) {
-        return false;
-    }
-
-    for (std::size_t i = 0; i < bytes_.size(); ++i) {
-        if (!mask_[i]) {
             continue;
         }
 
-        if (address[i] != bytes_[i]) {
-            return false;
+        if (i + 1 >= pattern.size()) {
+            break;
+        }
+
+        const char h1 = pattern[i];
+        const char h2 = pattern[i + 1];
+
+        auto hex = [](char c) -> int {
+            if (c >= '0' && c <= '9')
+                return c - '0';
+
+            if (c >= 'a' && c <= 'f')
+                return c - 'a' + 10;
+
+            if (c >= 'A' && c <= 'F')
+                return c - 'A' + 10;
+
+            return -1;
+        };
+
+        const int high = hex(h1);
+        const int low  = hex(h2);
+
+        if (high < 0 || low < 0) {
+            ++i;
+            continue;
+        }
+
+        bytes.push_back(
+            static_cast<char>((high << 4) | low)
+        );
+
+        mask.push_back('x');
+
+        i += 2;
+    }
+
+    return {
+        bytes.data(),
+        mask.data(),
+        bytes.size()
+    };
+}
+
+uintptr_t findPattern(
+    uintptr_t start,
+    std::size_t size,
+    const Pattern& pattern
+) {
+    if (!start ||
+        !size ||
+        !pattern.bytes ||
+        !pattern.mask ||
+        !pattern.size) {
+        return 0;
+    }
+
+    if (pattern.size > size) {
+        return 0;
+    }
+
+    const auto* memory =
+        reinterpret_cast<const uint8_t*>(start);
+
+    for (std::size_t i = 0;
+         i <= size - pattern.size;
+         ++i) {
+
+        bool matched = true;
+
+        for (std::size_t j = 0;
+             j < pattern.size;
+             ++j) {
+
+            if (pattern.mask[j] == '?') {
+                continue;
+            }
+
+            if (memory[i + j] !=
+                static_cast<uint8_t>(pattern.bytes[j])) {
+
+                matched = false;
+                break;
+            }
+        }
+
+        if (matched) {
+            return start + i;
         }
     }
 
-    return true;
+    return 0;
+}
+
+uintptr_t findPattern(
+    uintptr_t start,
+    std::size_t size,
+    std::string_view pattern
+) {
+    const Pattern parsed = parsePattern(pattern);
+
+    return findPattern(
+        start,
+        size,
+        parsed
+    );
 }
 
 } // namespace levi::memory
