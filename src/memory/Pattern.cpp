@@ -10,11 +10,14 @@ namespace {
 bool parseByte(
     std::string_view token,
     std::uint8_t& value,
-    bool& wildcard
+    std::uint8_t& mask
 ) noexcept {
-    if (token == "?" || token == "??") {
+    if (
+        token == "?" ||
+        token == "??"
+    ) {
         value = 0;
-        wildcard = true;
+        mask = 0;
         return true;
     }
 
@@ -34,15 +37,18 @@ bool parseByte(
     if (
         end == nullptr ||
         *end != '\0' ||
-        parsed > 0xFF
+        parsed > 0xff
     ) {
         return false;
     }
 
     value =
-        static_cast<std::uint8_t>(parsed);
+        static_cast<std::uint8_t>(
+            parsed
+        );
 
-    wildcard = false;
+    mask = 0xff;
+
     return true;
 }
 
@@ -65,7 +71,8 @@ Pattern::Pattern(
             break;
         }
 
-        const std::size_t begin = position;
+        const std::size_t begin =
+            position;
 
         while (
             position < pattern.size() &&
@@ -74,36 +81,60 @@ Pattern::Pattern(
             ++position;
         }
 
-        const std::string_view token =
+        const auto token =
             pattern.substr(
                 begin,
                 position - begin
             );
 
         std::uint8_t value = 0;
-        bool wildcard = false;
+        std::uint8_t mask = 0;
 
         if (
             !parseByte(
                 token,
                 value,
-                wildcard
+                mask
             )
         ) {
             bytes_.clear();
-            mask_.clear();
+            masks_.clear();
             return;
         }
 
         bytes_.push_back(value);
-        mask_.push_back(!wildcard);
+        masks_.push_back(mask);
     }
+}
+
+Pattern::Pattern(
+    const std::uint8_t* bytes,
+    const std::uint8_t* masks,
+    std::size_t size
+) {
+    if (
+        bytes == nullptr ||
+        masks == nullptr ||
+        size == 0
+    ) {
+        return;
+    }
+
+    bytes_.assign(
+        bytes,
+        bytes + size
+    );
+
+    masks_.assign(
+        masks,
+        masks + size
+    );
 }
 
 bool Pattern::valid() const noexcept {
     return
         !bytes_.empty() &&
-        bytes_.size() == mask_.size();
+        bytes_.size() == masks_.size();
 }
 
 std::size_t Pattern::size() const noexcept {
@@ -125,11 +156,19 @@ bool Pattern::matches(
         i < bytes_.size();
         ++i
     ) {
-        if (!mask_[i]) {
-            continue;
-        }
-
-        if (address[i] != bytes_[i]) {
+        /*
+         * Reference ItemPhysics uses exact-byte signatures.
+         *
+         * mask == 0:
+         *     wildcard
+         *
+         * mask == 0xff:
+         *     exact byte
+         */
+        if (
+            (address[i] & masks_[i]) !=
+            (bytes_[i] & masks_[i])
+        ) {
             return false;
         }
     }
@@ -142,9 +181,9 @@ Pattern::bytes() const noexcept {
     return bytes_;
 }
 
-const std::vector<bool>&
-Pattern::mask() const noexcept {
-    return mask_;
+const std::vector<std::uint8_t>&
+Pattern::masks() const noexcept {
+    return masks_;
 }
 
 } // namespace levi::memory
