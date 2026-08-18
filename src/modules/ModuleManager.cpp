@@ -20,6 +20,8 @@ ItemPhysics g_itemPhysics;
 
 bool g_profileResolved = false;
 
+minecraft::MinecraftTargets g_targets{};
+
 std::size_t moduleIndex(
     ModuleId id
 ) noexcept {
@@ -37,46 +39,89 @@ std::size_t moduleIndex(
     return 0;
 }
 
-void tryResolveMinecraft()
-    noexcept {
+void tryResolveMinecraft() noexcept {
     if (g_profileResolved) {
         return;
     }
 
-    levi::minecraft::MinecraftProfile::Resolution
-        resolution;
+    minecraft::MinecraftTargets targets{};
 
     if (
-        !levi::minecraft::MinecraftProfile::resolve(
-            resolution
+        !minecraft::MinecraftProfile::resolve(
+            targets
         )
     ) {
         return;
     }
 
     /*
-     * The profile must eventually provide the native
-     * ItemInHandRenderer object acquisition path.
+     * Keep the complete resolution result.
      *
-     * At the current repository state we do NOT possess
-     * that object pointer yet, so don't fabricate one.
+     * ItemPhysics consumes setupAndRender and
+     * renderItemGroup.
+     *
+     * ViewModel consumes ItemInHandRenderer.
      */
+    g_targets = targets;
+
     if (
-        resolution.render.renderFirstPerson.valid()
+        targets.itemInHandRenderer != 0
     ) {
+        /*
+         * IMPORTANT:
+         *
+         * ItemRenderer::attach() currently expects the
+         * native renderer OBJECT, while our RE currently
+         * gives us the FUNCTION target.
+         *
+         * Therefore we deliberately do NOT pass the
+         * function address as if it were an object pointer.
+         *
+         * The target is retained for the next native bridge
+         * stage.
+         */
         levi::core::Logger::info(
-            "Native renderFirstPerson target resolved"
+            "ItemInHandRenderer function target resolved: %p",
+            reinterpret_cast<void*>(
+                targets.itemInHandRenderer
+            )
         );
     }
 
     if (
-        resolution.camera.cameraVFunc.valid()
+        targets.setupAndRender != 0
     ) {
+        g_itemPhysics.bindNativeTargets(
+            targets.setupAndRender,
+            targets.renderItemGroup
+        );
+
         levi::core::Logger::info(
-            "Native camera target resolved"
+            "ItemPhysics setupAndRender target=%p",
+            reinterpret_cast<void*>(
+                targets.setupAndRender
+            )
         );
     }
 
+    if (
+        targets.renderItemGroup != 0
+    ) {
+        levi::core::Logger::info(
+            "ItemPhysics renderItemGroup target=%p",
+            reinterpret_cast<void*>(
+                targets.renderItemGroup
+            )
+        );
+    }
+
+    /*
+     * We consider target resolution complete only after
+     * the profile itself has successfully resolved.
+     *
+     * A missing optional target does not invalidate the
+     * entire profile.
+     */
     g_profileResolved = true;
 }
 
@@ -93,11 +138,11 @@ ModuleManager::ModuleManager()
 ModuleManager&
 ModuleManager::instance() {
     static ModuleManager manager;
+
     return manager;
 }
 
-bool ModuleManager::initialize()
-    noexcept {
+bool ModuleManager::initialize() noexcept {
     if (initialized_) {
         return true;
     }
@@ -134,9 +179,10 @@ bool ModuleManager::initialize()
     }
 
     /*
-     * Do this after module initialization.
+     * Minecraft may not be loaded yet.
      *
-     * Native library loading may occur after Levi itself.
+     * tryResolveMinecraft() is therefore also called
+     * from tick().
      */
     tryResolveMinecraft();
 
@@ -145,24 +191,41 @@ bool ModuleManager::initialize()
     return success;
 }
 
-void ModuleManager::shutdown()
-    noexcept {
+void ModuleManager::shutdown() noexcept {
     if (!initialized_) {
         return;
     }
 
     /*
-     * ViewModel must be disabled before the native
-     * renderer object can disappear.
+     * Disable modules before destroying their native
+     * relationships.
      */
+    g_viewModel.disable();
+    g_itemPhysics.disable();
+    g_freelook.disable();
+
+    /*
+     * Native renderer hook must be detached before the
+     * target object/function becomes invalid.
+     *
+     * At this stage ItemRenderer only detaches if an actual
+     * hook was installed.
+     */
+    minecraft::ItemRenderer::detach();
+
     for (Module* module : modules_) {
         if (module != nullptr) {
             module->shutdown();
         }
     }
 
-    initialized_ = false;
+    g_targets = {};
     g_profileResolved = false;
+    initialized_ = false;
+
+    levi::core::Logger::info(
+        "Module manager shutdown complete"
+    );
 }
 
 void ModuleManager::tick(
@@ -173,7 +236,7 @@ void ModuleManager::tick(
     }
 
     /*
-     * Retry native resolution while Minecraft is loading.
+     * Minecraft can finish loading after Levi starts.
      */
     if (!g_profileResolved) {
         tryResolveMinecraft();
@@ -218,8 +281,9 @@ bool ModuleManager::enable(
 ) noexcept {
     Module* module = get(id);
 
-    return module != nullptr &&
-           module->enable();
+    return
+        module != nullptr &&
+        module->enable();
 }
 
 void ModuleManager::disable(
@@ -232,8 +296,7 @@ void ModuleManager::disable(
     }
 }
 
-bool ModuleManager::initialized()
-    const noexcept {
+bool ModuleManager::initialized() const noexcept {
     return initialized_;
 }
 
