@@ -1,0 +1,79 @@
+name: Build LeviModules
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Android ARM64 Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        uses: android-actions/ndk-install@v1
+        with:
+          ndk-version: "27.2.12479018"
+
+      - name: Configure CMake
+        run: |
+          cmake -S . \
+            -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24
+
+      - name: Build
+        run: |
+          cmake --build build --parallel
+
+      - name: Verify native library
+        run: |
+          test -f build/libminecraft.so
+          file build/libminecraft.so
+
+      - name: Validate Minecraft profile
+        run: |
+          test -f profiles/1.26.44.3/profile.hpp
+          test -f profiles/1.26.44.3/signatures.hpp
+          test -f profiles/1.26.44.3/offsets.hpp
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p staging/lib/arm64-v8a
+
+          cp build/libminecraft.so \
+             staging/lib/arm64-v8a/libminecraft.so
+
+          cp manifest.json staging/manifest.json
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LeviModules-arm64-dev
+          path: staging/
+          if-no-files-found: error
