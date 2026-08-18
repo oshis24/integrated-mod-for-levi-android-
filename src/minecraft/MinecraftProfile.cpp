@@ -14,93 +14,87 @@ bool MinecraftProfile::supported() noexcept {
         runtime.isSupportedMinecraftVersion();
 }
 
-std::uintptr_t MinecraftProfile::resolveTarget(
+bool MinecraftProfile::libraryLoaded() noexcept {
+    levi::memory::MemoryRange range;
+
+    return levi::memory::PatternScanner::findTextRange(
+        kLibrary,
+        range
+    );
+}
+
+std::uintptr_t
+MinecraftProfile::resolveTarget(
     const char* name
 ) noexcept {
+    if (
+        !supported() ||
+        name == nullptr
+    ) {
+        return 0;
+    }
+
     /*
-     * Target resolution is deliberately centralized here.
+     * IMPORTANT:
      *
-     * Do NOT scatter Minecraft 1.26.44.3 addresses throughout
-     * individual modules.
+     * Do not put guessed byte signatures here.
      *
-     * Once a target has a confirmed signature/RVA, this is the
-     * only layer that should know how it is resolved.
+     * The latest repository does not contain the actual
+     * 1.26.44.3 instruction signatures, so returning zero is
+     * safer than hooking a false positive.
      */
-
-    if (!supported()) {
-        return 0;
-    }
-
-    if (name == nullptr) {
-        return 0;
-    }
-
     levi::core::Logger::debug(
-        "MinecraftProfile: resolving target %s",
+        "MinecraftProfile: target unresolved: %s",
         name
     );
-
-    /*
-     * No speculative signature is installed here.
-     *
-     * Returning 0 means "target unavailable", rather than
-     * silently hooking the wrong function.
-     */
 
     return 0;
 }
 
 bool MinecraftProfile::resolve(
-    RenderTargets& render,
-    CameraTargets& camera
+    Resolution& result
 ) noexcept {
-    render = {};
-    camera = {};
+    result = {};
 
     if (!supported()) {
+        return false;
+    }
+
+    if (!libraryLoaded()) {
         levi::core::Logger::warning(
-            "MinecraftProfile: unsupported runtime"
+            "MinecraftProfile: %s is not loaded",
+            kLibrary
         );
 
         return false;
     }
 
-    render.renderFirstPerson.address =
+    result.render.renderFirstPerson.address =
         resolveTarget(
             "ItemInHandRenderer::renderFirstPerson"
         );
 
-    render.renderItem.address =
+    result.render.renderItem.address =
         resolveTarget(
             "ItemInHandRenderer::renderItem"
         );
 
-    render.renderObject.address =
+    result.render.renderObject.address =
         resolveTarget(
             "ItemInHandRenderer::renderObject"
         );
 
-    camera.cameraVFunc.address =
+    result.camera.cameraVFunc.address =
         resolveTarget(
             "Camera::rotation"
         );
 
-    const bool anyRenderTarget =
-        render.renderFirstPerson.valid() ||
-        render.renderItem.valid() ||
-        render.renderObject.valid();
-
-    const bool anyCameraTarget =
-        camera.cameraVFunc.valid();
-
     levi::core::Logger::info(
-        "MinecraftProfile %s: render=%s camera=%s",
-        kVersion,
-        anyRenderTarget ? "available" : "unresolved",
-        anyCameraTarget ? "available" : "unresolved"
+        "MinecraftProfile %s: resolution complete",
+        kVersion
     );
 
-    return anyRenderTarget || anyCameraTarget;
+    return result.any();
 }
 
 } // namespace levi::minecraft
