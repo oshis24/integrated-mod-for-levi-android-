@@ -4,7 +4,6 @@
 #include "levi/core/Runtime.hpp"
 #include "levi/core/State.hpp"
 #include "levi/minecraft/ItemRenderer.hpp"
-#include "levi/minecraft/MinecraftProfile.hpp"
 
 namespace levi::modules {
 
@@ -32,22 +31,13 @@ bool ViewModel::initialize() noexcept {
         status_ =
             ModuleStatus::Failed;
 
-        levi::core::Logger::error(
-            "ViewModel: unsupported Minecraft %s",
-            runtime.minecraftVersion().c_str()
-        );
-
         return false;
     }
 
     transform_.reset();
 
     status_ =
-        ModuleStatus::WaitingForTarget;
-
-    levi::core::Logger::info(
-        "ViewModel: waiting for ItemInHandRenderer"
-    );
+        ModuleStatus::Ready;
 
     return true;
 }
@@ -66,44 +56,62 @@ void ViewModel::tick(
 ) noexcept {
     (void)deltaTime;
 
+    if (!enabled_) {
+        return;
+    }
+
     /*
-     * Render-time transform is deliberately NOT applied here.
-     *
-     * tick()
-     *     = state
-     *
-     * ItemRenderer callback
-     *     = MatrixStack mutation
+     * Synchronize configuration with the render bridge.
      */
+    levi::minecraft::ItemRenderer::
+        setViewModelTransform(
+            transform_
+        );
 }
 
 bool ViewModel::enable() noexcept {
+    if (
+        status_ != ModuleStatus::Ready &&
+        status_ != ModuleStatus::Active
+    ) {
+        return false;
+    }
+
+    /*
+     * Do not pretend the native hook exists.
+     *
+     * Module state can be active only once the native
+     * renderer is actually attached.
+     */
     if (
         !levi::minecraft::ItemRenderer::attached()
     ) {
         status_ =
             ModuleStatus::WaitingForTarget;
 
+        levi::core::Logger::warning(
+            "ViewModel: ItemInHandRenderer "
+            "is not attached"
+        );
+
         return false;
     }
 
     enabled_ = true;
 
-    levi::core::State::instance()
-        .setViewModelEnabled(true);
+    levi::minecraft::ItemRenderer::
+        setViewModelTransform(
+            transform_
+        );
 
     levi::minecraft::ItemRenderer::
         setViewModelEnabled(true);
 
-    levi::minecraft::ItemRenderer::
-        setViewModelTransform(transform_);
+    levi::core::State::instance()
+        .setViewModelEnabled(true);
 
     status_ =
         ModuleStatus::Active;
-
-    levi::core::Logger::info(
-        "ViewModel enabled"
-    );
 
     return true;
 }
@@ -111,11 +119,11 @@ bool ViewModel::enable() noexcept {
 void ViewModel::disable() noexcept {
     enabled_ = false;
 
-    levi::core::State::instance()
-        .setViewModelEnabled(false);
-
     levi::minecraft::ItemRenderer::
         setViewModelEnabled(false);
+
+    levi::core::State::instance()
+        .setViewModelEnabled(false);
 
     if (
         status_ == ModuleStatus::Active
@@ -129,7 +137,8 @@ bool ViewModel::enabled() const noexcept {
     return enabled_;
 }
 
-ModuleStatus ViewModel::status() const noexcept {
+ModuleStatus
+ViewModel::status() const noexcept {
     return status_;
 }
 
