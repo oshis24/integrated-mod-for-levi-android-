@@ -1,6 +1,11 @@
 #include "levi/modules/ModuleManager.hpp"
 
 #include "levi/core/Logger.hpp"
+#include "levi/core/Runtime.hpp"
+
+#include "levi/minecraft/ItemRenderer.hpp"
+#include "levi/minecraft/MinecraftProfile.hpp"
+
 #include "levi/modules/Freelook.hpp"
 #include "levi/modules/ItemPhysics.hpp"
 #include "levi/modules/ViewModel.hpp"
@@ -13,7 +18,11 @@ ViewModel g_viewModel;
 Freelook g_freelook;
 ItemPhysics g_itemPhysics;
 
-std::size_t moduleIndex(ModuleId id) noexcept {
+bool g_profileResolved = false;
+
+std::size_t moduleIndex(
+    ModuleId id
+) noexcept {
     switch (id) {
         case ModuleId::ViewModel:
             return 0;
@@ -28,6 +37,49 @@ std::size_t moduleIndex(ModuleId id) noexcept {
     return 0;
 }
 
+void tryResolveMinecraft()
+    noexcept {
+    if (g_profileResolved) {
+        return;
+    }
+
+    levi::minecraft::MinecraftProfile::Resolution
+        resolution;
+
+    if (
+        !levi::minecraft::MinecraftProfile::resolve(
+            resolution
+        )
+    ) {
+        return;
+    }
+
+    /*
+     * The profile must eventually provide the native
+     * ItemInHandRenderer object acquisition path.
+     *
+     * At the current repository state we do NOT possess
+     * that object pointer yet, so don't fabricate one.
+     */
+    if (
+        resolution.render.renderFirstPerson.valid()
+    ) {
+        levi::core::Logger::info(
+            "Native renderFirstPerson target resolved"
+        );
+    }
+
+    if (
+        resolution.camera.cameraVFunc.valid()
+    ) {
+        levi::core::Logger::info(
+            "Native camera target resolved"
+        );
+    }
+
+    g_profileResolved = true;
+}
+
 } // namespace
 
 ModuleManager::ModuleManager()
@@ -38,12 +90,14 @@ ModuleManager::ModuleManager()
     } {
 }
 
-ModuleManager& ModuleManager::instance() {
+ModuleManager&
+ModuleManager::instance() {
     static ModuleManager manager;
     return manager;
 }
 
-bool ModuleManager::initialize() noexcept {
+bool ModuleManager::initialize()
+    noexcept {
     if (initialized_) {
         return true;
     }
@@ -52,29 +106,25 @@ bool ModuleManager::initialize() noexcept {
         "Initializing module manager"
     );
 
-    bool allInitialized = true;
+    bool success = true;
 
     for (Module* module : modules_) {
         if (module == nullptr) {
-            allInitialized = false;
+            success = false;
             continue;
         }
 
         const bool result =
             module->initialize();
 
-        /*
-         * WaitingForTarget is not treated as a fatal
-         * initialization error. This allows the runtime to
-         * resolve the native profile later.
-         */
-        if (!result &&
+        if (
+            !result &&
             module->status() !=
-                ModuleStatus::WaitingForTarget &&
+                ModuleStatus::WaitingForRuntime &&
             module->status() !=
-                ModuleStatus::WaitingForRuntime) {
-
-            allInitialized = false;
+                ModuleStatus::WaitingForTarget
+        ) {
+            success = false;
 
             levi::core::Logger::error(
                 "Module initialization failed: %s",
@@ -83,24 +133,28 @@ bool ModuleManager::initialize() noexcept {
         }
     }
 
-    initialized_ = allInitialized;
+    /*
+     * Do this after module initialization.
+     *
+     * Native library loading may occur after Levi itself.
+     */
+    tryResolveMinecraft();
 
-    levi::core::Logger::info(
-        "Module manager initialized"
-    );
+    initialized_ = success;
 
-    return initialized_;
+    return success;
 }
 
-void ModuleManager::shutdown() noexcept {
+void ModuleManager::shutdown()
+    noexcept {
     if (!initialized_) {
         return;
     }
 
-    levi::core::Logger::info(
-        "Shutting down modules"
-    );
-
+    /*
+     * ViewModel must be disabled before the native
+     * renderer object can disappear.
+     */
     for (Module* module : modules_) {
         if (module != nullptr) {
             module->shutdown();
@@ -108,6 +162,7 @@ void ModuleManager::shutdown() noexcept {
     }
 
     initialized_ = false;
+    g_profileResolved = false;
 }
 
 void ModuleManager::tick(
@@ -117,12 +172,17 @@ void ModuleManager::tick(
         return;
     }
 
-    for (Module* module : modules_) {
-        if (module == nullptr) {
-            continue;
-        }
+    /*
+     * Retry native resolution while Minecraft is loading.
+     */
+    if (!g_profileResolved) {
+        tryResolveMinecraft();
+    }
 
-        module->tick(deltaTime);
+    for (Module* module : modules_) {
+        if (module != nullptr) {
+            module->tick(deltaTime);
+        }
     }
 }
 
@@ -139,7 +199,8 @@ Module* ModuleManager::get(
     return modules_[index];
 }
 
-const Module* ModuleManager::get(
+const Module*
+ModuleManager::get(
     ModuleId id
 ) const noexcept {
     const std::size_t index =
@@ -157,11 +218,8 @@ bool ModuleManager::enable(
 ) noexcept {
     Module* module = get(id);
 
-    if (module == nullptr) {
-        return false;
-    }
-
-    return module->enable();
+    return module != nullptr &&
+           module->enable();
 }
 
 void ModuleManager::disable(
@@ -174,7 +232,8 @@ void ModuleManager::disable(
     }
 }
 
-bool ModuleManager::initialized() const noexcept {
+bool ModuleManager::initialized()
+    const noexcept {
     return initialized_;
 }
 
