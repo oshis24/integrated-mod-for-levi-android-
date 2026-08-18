@@ -5,22 +5,6 @@
 
 namespace levi::minecraft {
 
-namespace {
-
-/*
- * From the previously reconstructed ItemInHandRenderer
- * vtable path:
- *
- *     vtable + 0x18
- *
- * therefore:
- *
- *     0x18 / sizeof(void*) = 3
- */
-constexpr std::size_t kRenderFirstPersonVTableIndex = 3;
-
-} // namespace
-
 bool ItemRenderer::attach(
     void* renderer
 ) noexcept {
@@ -34,19 +18,21 @@ bool ItemRenderer::attach(
 
     void* original = nullptr;
 
-    const bool replaced =
+    const bool success =
         levi::memory::VTable::replace(
             renderer,
-            kRenderFirstPersonVTableIndex,
+            kRenderFirstPersonIndex,
             reinterpret_cast<void*>(
                 &ItemRenderer::hookRenderFirstPerson
             ),
             &original
         );
 
-    if (!replaced || original == nullptr) {
+    if (!success || original == nullptr) {
         levi::core::Logger::error(
-            "ItemRenderer: vtable hook failed"
+            "ItemRenderer: failed to hook "
+            "vtable[%zu]",
+            kRenderFirstPersonIndex
         );
 
         return false;
@@ -57,34 +43,63 @@ bool ItemRenderer::attach(
     attached_ = true;
 
     levi::core::Logger::info(
-        "ItemRenderer: renderFirstPerson hook attached"
+        "ItemRenderer: attached at vtable[%zu]",
+        kRenderFirstPersonIndex
     );
 
     return true;
 }
 
 bool ItemRenderer::detach() noexcept {
-    /*
-     * VTable::replace() currently does not retain enough
-     * information to restore the original table entry safely.
-     *
-     * Therefore we deliberately do not pretend that detach
-     * is supported yet.
-     *
-     * Runtime shutdown must keep the native object alive until
-     * the owning renderer is destroyed.
-     */
-    return !attached_;
+    if (!attached_) {
+        return true;
+    }
+
+    if (
+        renderer_ == nullptr ||
+        originalRenderFirstPerson_ == nullptr
+    ) {
+        attached_ = false;
+        renderer_ = nullptr;
+        originalRenderFirstPerson_ = nullptr;
+
+        return true;
+    }
+
+    const bool restored =
+        levi::memory::VTable::restore(
+            renderer_,
+            kRenderFirstPersonIndex,
+            originalRenderFirstPerson_
+        );
+
+    if (!restored) {
+        return false;
+    }
+
+    renderer_ = nullptr;
+    originalRenderFirstPerson_ = nullptr;
+    attached_ = false;
+
+    return true;
 }
 
 bool ItemRenderer::attached() noexcept {
     return attached_;
 }
 
+void* ItemRenderer::renderer() noexcept {
+    return renderer_;
+}
+
 void ItemRenderer::setViewModelEnabled(
     bool enabled
 ) noexcept {
     viewModelEnabled_ = enabled;
+}
+
+bool ItemRenderer::viewModelEnabled() noexcept {
+    return viewModelEnabled_;
 }
 
 void ItemRenderer::setViewModelTransform(
@@ -98,85 +113,53 @@ ItemRenderer::viewModelTransform() noexcept {
     return viewModelTransform_;
 }
 
-void* ItemRenderer::renderer() noexcept {
-    return renderer_;
-}
-
-void ItemRenderer::applyViewModel(
-    MatrixStack* matrixStack
-) noexcept {
-    if (
-        !viewModelEnabled_ ||
-        matrixStack == nullptr ||
-        !matrixStack->valid()
-    ) {
-        return;
-    }
-
-    matrixStack->apply(
-        viewModelTransform_
-    );
-}
-
 void ItemRenderer::hookRenderFirstPerson(
     void* self,
     RenderContext* context,
     MatrixStack* matrixStack
 ) noexcept {
-    if (
-        originalRenderFirstPerson_ == nullptr
-    ) {
+    const auto original =
+        originalRenderFirstPerson_;
+
+    if (original == nullptr) {
         return;
     }
 
-    /*
-     * Important:
-     *
-     * The transform is isolated to this render invocation.
-     *
-     *     push
-     *       ↓
-     *     ViewModel transform
-     *       ↓
-     *     vanilla render
-     *       ↓
-     *     pop
-     */
-    if (
-        viewModelEnabled_ &&
-        matrixStack != nullptr &&
-        matrixStack->valid()
-    ) {
-        matrixStack->push();
-
-        applyViewModel(
-            matrixStack
+    const auto fn =
+        reinterpret_cast<RenderFirstPersonFn>(
+            original
         );
 
-        reinterpret_cast<
-            RenderFirstPersonFn
-        >(
-            originalRenderFirstPerson_
-        )(
+    /*
+     * No MatrixStack => absolutely no modification.
+     */
+    if (
+        !viewModelEnabled_ ||
+        matrixStack == nullptr ||
+        !matrixStack->valid()
+    ) {
+        fn(
             self,
             context,
             matrixStack
         );
 
-        matrixStack->pop();
-
         return;
     }
 
-    reinterpret_cast<
-        RenderFirstPersonFn
-    >(
-        originalRenderFirstPerson_
-    )(
+    matrixStack->push();
+
+    matrixStack->apply(
+        viewModelTransform_
+    );
+
+    fn(
         self,
         context,
         matrixStack
     );
+
+    matrixStack->pop();
 }
 
 } // namespace levi::minecraft
