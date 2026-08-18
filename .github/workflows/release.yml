@@ -1,0 +1,89 @@
+name: Release LeviModules
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Package .levipack
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        uses: android-actions/ndk-install@v1
+        with:
+          ndk-version: "27.2.12479018"
+
+      - name: Configure CMake
+        run: |
+          cmake -S . \
+            -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24
+
+      - name: Build
+        run: |
+          cmake --build build --parallel
+
+      - name: Verify build
+        run: |
+          test -f build/libminecraft.so
+
+      - name: Check profile
+        run: |
+          test -f profiles/1.26.44.3/profile.hpp
+          test -f profiles/1.26.44.3/signatures.hpp
+          test -f profiles/1.26.44.3/offsets.hpp
+
+      - name: Prepare LeviPack
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          rm -rf package
+          mkdir -p package/lib/arm64-v8a
+
+          cp build/libminecraft.so \
+             package/lib/arm64-v8a/libminecraft.so
+
+          cp manifest.json \
+             package/manifest.json
+
+          echo "${VERSION}" > package/VERSION
+
+      - name: Create .levipack
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          cd package
+
+          zip -r \
+            "../LeviModules-${VERSION}.levipack" \
+            .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            LeviModules-*.levipack
+          generate_release_notes: true
