@@ -18,6 +18,12 @@ public:
         void* replacement,
         void** original
     ) noexcept;
+
+    static bool restore(
+        void* object,
+        std::size_t index,
+        void* original
+    ) noexcept;
 };
 
 } // namespace levi::memory
