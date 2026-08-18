@@ -28,6 +28,7 @@ add_library(${LEVI_TARGET} SHARED
     src/minecraft/MatrixStack.cpp
     src/minecraft/RenderContext.cpp
 
+    src/modules/ModuleManager.cpp
     src/modules/ViewModel.cpp
     src/modules/Freelook.cpp
     src/modules/ItemPhysics.cpp
