@@ -3,6 +3,7 @@
 #include "levi/core/Logger.hpp"
 #include "levi/core/Runtime.hpp"
 #include "levi/core/State.hpp"
+#include "levi/minecraft/ItemRenderer.hpp"
 #include "levi/minecraft/MinecraftProfile.hpp"
 
 namespace levi::modules {
@@ -19,20 +20,21 @@ bool ViewModel::initialize() noexcept {
         levi::core::Runtime::instance();
 
     if (!runtime.isInitialized()) {
-        status_ = ModuleStatus::WaitingForRuntime;
-
-        levi::core::Logger::debug(
-            "ViewModel: runtime is not initialized"
-        );
+        status_ =
+            ModuleStatus::WaitingForRuntime;
 
         return false;
     }
 
-    if (!runtime.isSupportedMinecraftVersion()) {
-        status_ = ModuleStatus::Failed;
+    if (
+        !runtime.isSupportedMinecraftVersion()
+    ) {
+        status_ =
+            ModuleStatus::Failed;
 
         levi::core::Logger::error(
-            "ViewModel: unsupported Minecraft version"
+            "ViewModel: unsupported Minecraft %s",
+            runtime.minecraftVersion().c_str()
         );
 
         return false;
@@ -40,34 +42,11 @@ bool ViewModel::initialize() noexcept {
 
     transform_.reset();
 
-    /*
-     * Default ViewModel transform.
-     *
-     * Kept neutral until the native render callback is attached.
-     */
-    transform_.translation = {
-        0.0f,
-        0.0f,
-        0.0f
-    };
-
-    transform_.rotation = {
-        0.0f,
-        0.0f,
-        0.0f
-    };
-
-    transform_.scale = {
-        1.0f,
-        1.0f,
-        1.0f
-    };
-
-    status_ = ModuleStatus::Ready;
+    status_ =
+        ModuleStatus::WaitingForTarget;
 
     levi::core::Logger::info(
-        "ViewModel initialized for Minecraft %s",
-        levi::minecraft::MinecraftProfile::kVersion
+        "ViewModel: waiting for ItemInHandRenderer"
     );
 
     return true;
@@ -78,7 +57,8 @@ void ViewModel::shutdown() noexcept {
 
     transform_.reset();
 
-    status_ = ModuleStatus::Disabled;
+    status_ =
+        ModuleStatus::Disabled;
 }
 
 void ViewModel::tick(
@@ -86,29 +66,24 @@ void ViewModel::tick(
 ) noexcept {
     (void)deltaTime;
 
-    if (!enabled_) {
-        return;
-    }
-
     /*
-     * The actual MatrixStack mutation happens at the
-     * first-person render boundary, not once per tick.
-     *
-     * This is important:
+     * Render-time transform is deliberately NOT applied here.
      *
      * tick()
-     *   = update module state
+     *     = state
      *
-     * render callback
-     *   = apply MatrixStack transform
+     * ItemRenderer callback
+     *     = MatrixStack mutation
      */
 }
 
 bool ViewModel::enable() noexcept {
     if (
-        status_ != ModuleStatus::Ready &&
-        status_ != ModuleStatus::Active
+        !levi::minecraft::ItemRenderer::attached()
     ) {
+        status_ =
+            ModuleStatus::WaitingForTarget;
+
         return false;
     }
 
@@ -117,7 +92,14 @@ bool ViewModel::enable() noexcept {
     levi::core::State::instance()
         .setViewModelEnabled(true);
 
-    status_ = ModuleStatus::Active;
+    levi::minecraft::ItemRenderer::
+        setViewModelEnabled(true);
+
+    levi::minecraft::ItemRenderer::
+        setViewModelTransform(transform_);
+
+    status_ =
+        ModuleStatus::Active;
 
     levi::core::Logger::info(
         "ViewModel enabled"
@@ -132,8 +114,14 @@ void ViewModel::disable() noexcept {
     levi::core::State::instance()
         .setViewModelEnabled(false);
 
-    if (status_ == ModuleStatus::Active) {
-        status_ = ModuleStatus::Ready;
+    levi::minecraft::ItemRenderer::
+        setViewModelEnabled(false);
+
+    if (
+        status_ == ModuleStatus::Active
+    ) {
+        status_ =
+            ModuleStatus::Ready;
     }
 }
 
