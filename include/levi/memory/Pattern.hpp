@@ -2,40 +2,28 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
-#include <vector>
+#include <string_view>
 
 namespace levi::memory {
 
-class Pattern final {
-public:
-    Pattern() = default;
-
-    /*
-     * Pattern format:
-     *
-     *     "AA BB CC ?? DD EE"
-     *
-     * ?? means wildcard.
-     */
-    explicit Pattern(const char* pattern);
-
-    explicit Pattern(const std::string& pattern);
-
-    bool valid() const noexcept;
-
-    const std::vector<std::uint8_t>& bytes() const noexcept;
-    const std::vector<bool>& mask() const noexcept;
-
-    std::size_t size() const noexcept;
-
-    bool matches(
-        const std::uint8_t* address
-    ) const noexcept;
-
-private:
-    std::vector<std::uint8_t> bytes_;
-    std::vector<bool> mask_;
+struct Pattern {
+    const char* bytes;
+    const char* mask;
+    std::size_t size;
 };
+
+Pattern parsePattern(std::string_view pattern);
+
+uintptr_t findPattern(
+    uintptr_t start,
+    std::size_t size,
+    const Pattern& pattern
+);
+
+uintptr_t findPattern(
+    uintptr_t start,
+    std::size_t size,
+    std::string_view pattern
+);
 
 } // namespace levi::memory
