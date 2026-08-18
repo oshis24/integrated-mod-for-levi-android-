@@ -1,5 +1,6 @@
 #pragma once
 
+#include "levi/math/Transform.hpp"
 #include "levi/modules/Module.hpp"
 
 namespace levi::modules {
@@ -28,12 +29,29 @@ public:
 
     ModuleStatus status() const noexcept override;
 
+    const levi::math::Transform&
+    transform() const noexcept {
+        return transform_;
+    }
+
+    void setTransform(
+        const levi::math::Transform& value
+    ) noexcept {
+        transform_ = value;
+    }
+
+    void resetTransform() noexcept {
+        transform_.reset();
+    }
+
 private:
     bool enabled_{false};
 
     ModuleStatus status_{
         ModuleStatus::Disabled
     };
+
+    levi::math::Transform transform_{};
 };
 
 } // namespace levi::modules
