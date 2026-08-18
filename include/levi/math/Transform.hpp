@@ -36,12 +36,33 @@ struct Transform {
     void reset() noexcept {
         translation = {};
         rotation = {};
+
         scale = {
             1.0f,
             1.0f,
             1.0f
         };
+
         pivot = {};
+    }
+
+    bool isIdentity() const noexcept {
+        return
+            translation.x == 0.0f &&
+            translation.y == 0.0f &&
+            translation.z == 0.0f &&
+
+            rotation.x == 0.0f &&
+            rotation.y == 0.0f &&
+            rotation.z == 0.0f &&
+
+            scale.x == 1.0f &&
+            scale.y == 1.0f &&
+            scale.z == 1.0f &&
+
+            pivot.x == 0.0f &&
+            pivot.y == 0.0f &&
+            pivot.z == 0.0f;
     }
 };
 
