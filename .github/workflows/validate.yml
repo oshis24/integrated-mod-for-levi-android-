@@ -1,0 +1,52 @@
+name: Validate Native Profile
+
+on:
+  push:
+    paths:
+      - "profiles/**"
+      - "include/**"
+      - "src/**"
+  pull_request:
+    paths:
+      - "profiles/**"
+      - "include/**"
+      - "src/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    name: Validate 1.26.44.3 Profile
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check profile files
+        run: |
+          test -f profiles/1.26.44.3/profile.hpp
+          test -f profiles/1.26.44.3/signatures.hpp
+          test -f profiles/1.26.44.3/offsets.hpp
+
+      - name: Check required module directories
+        run: |
+          test -d include/levi/modules
+          test -d src/modules
+
+      - name: Show profile status
+        run: |
+          echo "Minecraft target: 1.26.44.3"
+          echo "Architecture: arm64-v8a"
+          echo ""
+          echo "Native targets must be verified before production release."
+
+      - name: Reject accidental hardcoded placeholder addresses
+        run: |
+          if grep -R -nE '0x123456|0xDEADBEEF|0xCAFEBABE' \
+              include src profiles; then
+            echo "ERROR: Placeholder native address detected."
+            exit 1
+          fi
