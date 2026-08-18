@@ -3,6 +3,7 @@
 #include "levi/core/Logger.hpp"
 #include "levi/core/Runtime.hpp"
 #include "levi/memory/Pattern.hpp"
+#include "levi/minecraft/ItemRenderer.hpp"
 
 namespace levi::minecraft {
 
@@ -245,6 +246,18 @@ bool MinecraftProfile::resolve(
 
     targets.itemInHandRenderer =
         resolveItemInHandRenderer(text);
+
+    if (
+    targets.itemInHandRenderer != 0
+) {
+    core::Logger::info(
+        "MinecraftProfile: ItemInHandRenderer "
+        "target confirmed at %p",
+        reinterpret_cast<void*>(
+            targets.itemInHandRenderer
+        )
+    );
+    }
 
     core::Logger::info(
         "MinecraftProfile %s",
