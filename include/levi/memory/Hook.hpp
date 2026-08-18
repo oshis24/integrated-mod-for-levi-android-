@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 
 namespace levi::memory {
@@ -30,6 +29,7 @@ public:
     Hook& operator=(Hook&& other) noexcept;
 
     bool install();
+
     bool remove();
 
     bool installed() const noexcept;
@@ -37,14 +37,26 @@ public:
     HookStatus status() const noexcept;
 
     std::uintptr_t target() const noexcept;
+
     void* replacement() const noexcept;
 
     void* original() const noexcept;
 
 private:
     std::uintptr_t target_{0};
+
     void* replacement_{nullptr};
+
     void* original_{nullptr};
+
+    /*
+     * Backend state is opaque to the rest of Levi.
+     *
+     * This is deliberately kept as void* so that the public
+     * interface does not depend on the implementation of the
+     * ARM64 hook backend.
+     */
+    void* backendState_{nullptr};
 
     HookStatus status_{
         HookStatus::Uninitialized
