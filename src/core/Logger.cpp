@@ -1,6 +1,7 @@
 #include "levi/core/Logger.hpp"
 
 #include <android/log.h>
+#include <cstdio>
 
 namespace levi::core {
 
