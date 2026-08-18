@@ -30,16 +30,17 @@ bool ItemPhysics::initialize() noexcept {
         status_ =
             ModuleStatus::Failed;
 
+        levi::core::Logger::error(
+            "ItemPhysics: unsupported Minecraft version"
+        );
+
         return false;
     }
 
-    /*
-     * Unlike the reference ItemPhysics implementation,
-     * we don't modify every item identically.
-     *
-     * The renderer will classify the visual representation
-     * first, then request the appropriate transform.
-     */
+    enabled_ = false;
+
+    setupAndRenderTarget_ = 0;
+    renderItemGroupTarget_ = 0;
 
     status_ =
         ModuleStatus::Ready;
@@ -54,6 +55,9 @@ bool ItemPhysics::initialize() noexcept {
 void ItemPhysics::shutdown() noexcept {
     disable();
 
+    setupAndRenderTarget_ = 0;
+    renderItemGroupTarget_ = 0;
+
     status_ =
         ModuleStatus::Disabled;
 }
@@ -62,6 +66,19 @@ void ItemPhysics::tick(
     float deltaTime
 ) noexcept {
     (void)deltaTime;
+
+    if (!enabled_) {
+        return;
+    }
+
+    /*
+     * Native rendering is intentionally not performed from
+     * tick().
+     *
+     * ItemPhysics must execute inside the actual item-render
+     * boundary so its MatrixStack state belongs to the item
+     * currently being rendered.
+     */
 }
 
 bool ItemPhysics::enable() noexcept {
@@ -69,6 +86,18 @@ bool ItemPhysics::enable() noexcept {
         status_ != ModuleStatus::Ready &&
         status_ != ModuleStatus::Active
     ) {
+        return false;
+    }
+
+    if (!nativeTargetsResolved()) {
+        status_ =
+            ModuleStatus::WaitingForTarget;
+
+        levi::core::Logger::warning(
+            "ItemPhysics: native render targets "
+            "are not resolved yet"
+        );
+
         return false;
     }
 
@@ -105,8 +134,61 @@ bool ItemPhysics::enabled() const noexcept {
     return enabled_;
 }
 
-ModuleStatus ItemPhysics::status() const noexcept {
+ModuleStatus
+ItemPhysics::status() const noexcept {
     return status_;
+}
+
+void ItemPhysics::bindNativeTargets(
+    std::uintptr_t setupAndRender,
+    std::uintptr_t renderItemGroup
+) noexcept {
+    setupAndRenderTarget_ =
+        setupAndRender;
+
+    renderItemGroupTarget_ =
+        renderItemGroup;
+
+    if (nativeTargetsResolved()) {
+        if (
+            status_ ==
+            ModuleStatus::WaitingForTarget
+        ) {
+            status_ =
+                ModuleStatus::Ready;
+        }
+
+        levi::core::Logger::info(
+            "ItemPhysics: native targets bound"
+        );
+    }
+}
+
+std::uintptr_t
+ItemPhysics::setupAndRenderTarget()
+    const noexcept {
+    return setupAndRenderTarget_;
+}
+
+std::uintptr_t
+ItemPhysics::renderItemGroupTarget()
+    const noexcept {
+    return renderItemGroupTarget_;
+}
+
+bool ItemPhysics::nativeTargetsResolved()
+    const noexcept {
+    /*
+     * setupAndRender is the primary native boundary.
+     *
+     * renderItemGroup is an additional render path.
+     *
+     * We don't require both simultaneously because different
+     * builds/reference paths may expose only one of them.
+     */
+    return
+        setupAndRenderTarget_ != 0 ||
+        renderItemGroupTarget_ != 0;
 }
 
 ItemPhysicsTransform
@@ -118,16 +200,20 @@ ItemPhysics::transformFor(
     result.visualType = type;
 
     /*
-     * The important part here is that we DON'T use a universal
-     * 90-degree correction.
+     * This function describes the visual policy only.
      *
-     * The broken reference mod effectively does that for a
-     * number of representations, which is why some items look
-     * horizontal while others continue spinning.
+     * It does NOT claim that the native item has already
+     * been transformed. Actual transformation must happen
+     * inside the native rendering callback.
      */
 
     switch (type) {
         case ItemVisualType::Shield:
+            /*
+             * Shield must use its own orientation path.
+             *
+             * Do not apply the generic flat-item correction.
+             */
             result.transform.rotation = {
                 0.0f,
                 0.0f,
@@ -136,6 +222,10 @@ ItemPhysics::transformFor(
             break;
 
         case ItemVisualType::Banner:
+            /*
+             * Banner has its own model orientation and should
+             * not inherit the generic dropped-item rotation.
+             */
             result.transform.rotation = {
                 0.0f,
                 0.0f,
