@@ -15,6 +15,12 @@ public:
         std::string_view pattern
     );
 
+    Pattern(
+        const std::uint8_t* bytes,
+        const std::uint8_t* masks,
+        std::size_t size
+    );
+
     bool valid() const noexcept;
 
     std::size_t size() const noexcept;
@@ -25,14 +31,14 @@ public:
 
 private:
     std::vector<std::uint8_t> bytes_;
-    std::vector<bool> mask_;
+    std::vector<std::uint8_t> masks_;
 
 public:
-    const std::vector<std::uint8_t>& bytes()
-        const noexcept;
+    const std::vector<std::uint8_t>&
+    bytes() const noexcept;
 
-    const std::vector<bool>& mask()
-        const noexcept;
+    const std::vector<std::uint8_t>&
+    masks() const noexcept;
 };
 
 } // namespace levi::memory
