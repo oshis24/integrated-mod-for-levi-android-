@@ -26,26 +26,33 @@ public:
         Target renderFirstPerson;
         Target renderItem;
         Target renderObject;
-
-        bool valid() const noexcept {
-            return
-                renderFirstPerson.valid() &&
-                renderItem.valid() &&
-                renderObject.valid();
-        }
     };
 
     struct CameraTargets {
         Target cameraVFunc;
     };
 
+    struct Resolution {
+        RenderTargets render{};
+        CameraTargets camera{};
+
+        bool any() const noexcept {
+            return
+                render.renderFirstPerson.valid() ||
+                render.renderItem.valid() ||
+                render.renderObject.valid() ||
+                camera.cameraVFunc.valid();
+        }
+    };
+
 public:
     static bool resolve(
-        RenderTargets& render,
-        CameraTargets& camera
+        Resolution& result
     ) noexcept;
 
     static bool supported() noexcept;
+
+    static bool libraryLoaded() noexcept;
 
 private:
     static std::uintptr_t resolveTarget(
