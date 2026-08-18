@@ -2,16 +2,21 @@
 
 #include "levi/core/Logger.hpp"
 #include "levi/core/Runtime.hpp"
+#include "levi/core/State.hpp"
+#include "levi/minecraft/MinecraftProfile.hpp"
 
 namespace levi::modules {
 
 bool ViewModel::initialize() noexcept {
-    if (status_ != ModuleStatus::Disabled &&
-        status_ != ModuleStatus::Failed) {
+    if (
+        status_ != ModuleStatus::Disabled &&
+        status_ != ModuleStatus::Failed
+    ) {
         return true;
     }
 
-    auto& runtime = levi::core::Runtime::instance();
+    auto& runtime =
+        levi::core::Runtime::instance();
 
     if (!runtime.isInitialized()) {
         status_ = ModuleStatus::WaitingForRuntime;
@@ -23,20 +28,46 @@ bool ViewModel::initialize() noexcept {
         return false;
     }
 
-    /*
-     * IMPORTANT:
-     *
-     * No Minecraft native address is used here yet.
-     *
-     * The actual ViewModel implementation will eventually
-     * hook the verified first-person rendering path from
-     * the 1.26.44.3 profile.
-     */
+    if (!runtime.isSupportedMinecraftVersion()) {
+        status_ = ModuleStatus::Failed;
 
-    status_ = ModuleStatus::WaitingForTarget;
+        levi::core::Logger::error(
+            "ViewModel: unsupported Minecraft version"
+        );
+
+        return false;
+    }
+
+    transform_.reset();
+
+    /*
+     * Default ViewModel transform.
+     *
+     * Kept neutral until the native render callback is attached.
+     */
+    transform_.translation = {
+        0.0f,
+        0.0f,
+        0.0f
+    };
+
+    transform_.rotation = {
+        0.0f,
+        0.0f,
+        0.0f
+    };
+
+    transform_.scale = {
+        1.0f,
+        1.0f,
+        1.0f
+    };
+
+    status_ = ModuleStatus::Ready;
 
     levi::core::Logger::info(
-        "ViewModel initialized; waiting for native target"
+        "ViewModel initialized for Minecraft %s",
+        levi::minecraft::MinecraftProfile::kVersion
     );
 
     return true;
@@ -45,15 +76,14 @@ bool ViewModel::initialize() noexcept {
 void ViewModel::shutdown() noexcept {
     disable();
 
-    status_ = ModuleStatus::Disabled;
+    transform_.reset();
 
-    /*
-     * Native hook removal will be performed here once the
-     * verified rendering target is connected.
-     */
+    status_ = ModuleStatus::Disabled;
 }
 
-void ViewModel::tick(float deltaTime) noexcept {
+void ViewModel::tick(
+    float deltaTime
+) noexcept {
     (void)deltaTime;
 
     if (!enabled_) {
@@ -61,42 +91,46 @@ void ViewModel::tick(float deltaTime) noexcept {
     }
 
     /*
-     * Actual transformation:
+     * The actual MatrixStack mutation happens at the
+     * first-person render boundary, not once per tick.
      *
-     * translation
-     * rotation
-     * scale
+     * This is important:
      *
-     * will be applied to the first-person MatrixStack
-     * after the 1.26.44.3 render path is bound.
+     * tick()
+     *   = update module state
+     *
+     * render callback
+     *   = apply MatrixStack transform
      */
 }
 
 bool ViewModel::enable() noexcept {
-    if (status_ == ModuleStatus::Failed) {
-        return false;
-    }
-
-    if (status_ == ModuleStatus::WaitingForTarget) {
-        /*
-         * Do not activate a module without a verified target.
-         */
-        levi::core::Logger::warning(
-            "ViewModel cannot be enabled: "
-            "native target is not verified"
-        );
-
+    if (
+        status_ != ModuleStatus::Ready &&
+        status_ != ModuleStatus::Active
+    ) {
         return false;
     }
 
     enabled_ = true;
+
+    levi::core::State::instance()
+        .setViewModelEnabled(true);
+
     status_ = ModuleStatus::Active;
+
+    levi::core::Logger::info(
+        "ViewModel enabled"
+    );
 
     return true;
 }
 
 void ViewModel::disable() noexcept {
     enabled_ = false;
+
+    levi::core::State::instance()
+        .setViewModelEnabled(false);
 
     if (status_ == ModuleStatus::Active) {
         status_ = ModuleStatus::Ready;
