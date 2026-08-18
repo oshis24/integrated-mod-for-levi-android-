@@ -1,33 +1,25 @@
 #pragma once
 
+#include "levi/math/Transform.hpp"
 #include "levi/minecraft/MatrixStack.hpp"
 #include "levi/minecraft/RenderContext.hpp"
 
-#include <cstddef>
+#include "levi/memory/Hook.hpp"
+
 #include <cstdint>
 
 namespace levi::minecraft {
 
 class ItemRenderer final {
 public:
-    /*
-     * Hasil RE kita saat ini:
-     *
-     * ItemInHandRenderer
-     *        |
-     *        +-- vtable + 0x18
-     *
-     * 0x18 / 8 = 3
-     *
-     * Jadi entry yang kita intercept adalah index 3.
-     *
-     * ABI callback TIDAK boleh dianggap final sebelum binary
-     * target memberikan boundary lengkap. Karena itu callback
-     * menggunakan ABI yang sudah digunakan repo saat ini.
-     */
-    static constexpr std::size_t
-        kRenderFirstPersonIndex = 3;
 
+    /*
+     * This is the native function boundary resolved from
+     * Minecraft 1.26.44.3.
+     *
+     * The exact ABI is intentionally kept identical to the
+     * current repository boundary.
+     */
     using RenderFirstPersonFn =
         void(*)(
             void* self,
@@ -36,15 +28,16 @@ public:
         );
 
 public:
+
     static bool attach(
-        void* renderer
+        std::uintptr_t target
     ) noexcept;
 
     static bool detach() noexcept;
 
     static bool attached() noexcept;
 
-    static void* renderer() noexcept;
+    static std::uintptr_t target() noexcept;
 
     static void setViewModelEnabled(
         bool enabled
@@ -59,7 +52,10 @@ public:
     static const levi::math::Transform&
     viewModelTransform() noexcept;
 
+    static void* original() noexcept;
+
 private:
+
     static void hookRenderFirstPerson(
         void* self,
         RenderContext* context,
@@ -67,12 +63,14 @@ private:
     ) noexcept;
 
 private:
-    inline static void* renderer_{nullptr};
 
-    inline static void*
-        originalRenderFirstPerson_{nullptr};
+    inline static levi::memory::Hook hook_{};
 
-    inline static bool attached_{false};
+    inline static std::uintptr_t
+        target_{0};
+
+    inline static bool
+        attached_{false};
 
     inline static bool
         viewModelEnabled_{false};
