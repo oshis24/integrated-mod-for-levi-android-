@@ -1,53 +1,8 @@
 #include "levi/minecraft/ItemRenderer.hpp"
 
 #include "levi/core/Logger.hpp"
-#include "levi/minecraft/MatrixStack.hpp"
 
 namespace levi::minecraft {
-
-namespace {
-
-MatrixStack resolveMatrixStack(
-    void* renderContext
-) noexcept {
-    /*
-     * BedrockTools Render layout:
-     *
-     * RenderContext
-     *     +0x28 -> MatrixStackWrapper
-     *
-     * MatrixStackWrapper
-     *     +0x18 -> MatrixStack
-     *
-     * We only use this when the pointers are non-null.
-     */
-    if (renderContext == nullptr) {
-        return {};
-    }
-
-    const auto context =
-        reinterpret_cast<
-            std::uintptr_t
-        >(renderContext);
-
-    const auto wrapper =
-        *reinterpret_cast<
-            std::uintptr_t*
-        >(context + 0x28);
-
-    if (wrapper == 0) {
-        return {};
-    }
-
-    const auto stack =
-        *reinterpret_cast<
-            std::uintptr_t*
-        >(wrapper + 0x18);
-
-    return MatrixStack(stack);
-}
-
-} // namespace
 
 bool ItemRenderer::attach(
     std::uintptr_t target
@@ -57,11 +12,11 @@ bool ItemRenderer::attach(
     }
 
     if (attached_) {
-        return target_ == target;
+        return true;
     }
 
     hook_ =
-        memory::Hook(
+        levi::memory::Hook(
             target,
             reinterpret_cast<void*>(
                 &ItemRenderer::renderItemDetour
@@ -70,20 +25,16 @@ bool ItemRenderer::attach(
 
     if (!hook_.install()) {
         core::Logger::error(
-            "ItemRenderer: RenderItem hook failed"
+            "ItemRenderer: failed to hook RenderItem"
         );
 
         return false;
     }
 
-    target_ = target;
     attached_ = true;
 
     core::Logger::info(
-        "ItemRenderer: RenderItem hook installed %p",
-        reinterpret_cast<void*>(
-            target_
-        )
+        "ItemRenderer: RenderItem hook active"
     );
 
     return true;
@@ -98,7 +49,6 @@ bool ItemRenderer::detach() noexcept {
         return false;
     }
 
-    target_ = 0;
     attached_ = false;
 
     return true;
@@ -110,11 +60,6 @@ bool ItemRenderer::attached() noexcept {
         hook_.installed();
 }
 
-std::uintptr_t
-ItemRenderer::target() noexcept {
-    return target_;
-}
-
 void ItemRenderer::setViewModelEnabled(
     bool enabled
 ) noexcept {
@@ -124,15 +69,49 @@ void ItemRenderer::setViewModelEnabled(
 void ItemRenderer::setViewModelTransform(
     const levi::math::Transform& transform
 ) noexcept {
-    transform_ = transform;
+    viewModelTransform_ = transform;
 }
 
-bool ItemRenderer::viewModelEnabled() noexcept {
-    return viewModelEnabled_;
+void ItemRenderer::setViewModelPerspective(
+    bool thirdPerson,
+    bool applyThirdPerson
+) noexcept {
+    thirdPerson_ = thirdPerson;
+    applyThirdPerson_ = applyThirdPerson;
 }
 
-void* ItemRenderer::original() noexcept {
-    return hook_.original();
+void ItemRenderer::setWorldTransformCallback(
+    WorldTransformCallback callback
+) noexcept {
+    worldTransformCallback_ = callback;
+}
+
+void ItemRenderer::beginWorldItemRender(
+    void* worldItemKey
+) noexcept {
+    if (worldItemDepth_ == 0) {
+        worldItemKey_ = worldItemKey;
+    }
+
+    ++worldItemDepth_;
+}
+
+void ItemRenderer::endWorldItemRender() noexcept {
+    if (worldItemDepth_ <= 0) {
+        worldItemDepth_ = 0;
+        worldItemKey_ = nullptr;
+        return;
+    }
+
+    --worldItemDepth_;
+
+    if (worldItemDepth_ == 0) {
+        worldItemKey_ = nullptr;
+    }
+}
+
+bool ItemRenderer::inWorldItemRender() noexcept {
+    return worldItemDepth_ > 0;
 }
 
 void ItemRenderer::renderItemDetour(
@@ -154,35 +133,32 @@ void ItemRenderer::renderItemDetour(
         return;
     }
 
-    /*
-     * We only transform first-person main-hand rendering.
-     *
-     * Off-hand / world rendering remains untouched here.
-     */
-    if (
-        !viewModelEnabled_ ||
-        renderingMainHand == 0
-    ) {
-        original(
-            self,
-            renderContext,
-            entity,
-            item,
-            posAndRotSet,
-            itemFlags,
-            useMatrixAsIs,
-            renderingMainHand
-        );
-
-        return;
-    }
-
     auto matrixStack =
-        resolveMatrixStack(
+        MatrixStack::fromRenderContext(
             renderContext
         );
 
-    if (!matrixStack.valid()) {
+    /*
+     * Dropped-world-item scope takes priority.
+     *
+     * RE showed world items can reach RenderItem with
+     * renderingMainHand == 1 too.
+     */
+    if (
+        inWorldItemRender() &&
+        worldTransformCallback_ != nullptr &&
+        matrixStack.current() != nullptr
+    ) {
+        Matrix4 snapshot{};
+
+        const bool haveSnapshot =
+            matrixStack.snapshot(snapshot);
+
+        worldTransformCallback_(
+            worldItemKey_,
+            matrixStack
+        );
+
         original(
             self,
             renderContext,
@@ -194,27 +170,48 @@ void ItemRenderer::renderItemDetour(
             renderingMainHand
         );
 
+        if (haveSnapshot) {
+            matrixStack.restore(snapshot);
+        }
+
         return;
     }
 
-    /*
-     * Main ViewModel implementation:
-     *
-     *     push
-     *        |
-     *        +-- translation
-     *        +-- rotation
-     *        +-- scale
-     *        |
-     *     original RenderItem
-     *        |
-     *      pop
-     */
-    matrixStack.push();
+    const bool allowViewModel =
+        viewModelEnabled_ &&
+        renderingMainHand != 0 &&
+        (!thirdPerson_ || applyThirdPerson_);
 
-    matrixStack.apply(
-        transform_
-    );
+    if (
+        allowViewModel &&
+        matrixStack.current() != nullptr
+    ) {
+        Matrix4 snapshot{};
+
+        const bool haveSnapshot =
+            matrixStack.snapshot(snapshot);
+
+        matrixStack.apply(
+            viewModelTransform_
+        );
+
+        original(
+            self,
+            renderContext,
+            entity,
+            item,
+            posAndRotSet,
+            itemFlags,
+            useMatrixAsIs,
+            renderingMainHand
+        );
+
+        if (haveSnapshot) {
+            matrixStack.restore(snapshot);
+        }
+
+        return;
+    }
 
     original(
         self,
@@ -226,8 +223,6 @@ void ItemRenderer::renderItemDetour(
         useMatrixAsIs,
         renderingMainHand
     );
-
-    matrixStack.pop();
 }
 
 } // namespace levi::minecraft
