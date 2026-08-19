@@ -6,6 +6,8 @@ namespace levi::minecraft {
 
 struct MinecraftTargets final {
     std::uintptr_t renderItem{0};
+    std::uintptr_t renderObject{0};
+
     std::uintptr_t getFov{0};
     std::uintptr_t getPerspective{0};
     std::uintptr_t localPlayerApplyTurnDelta{0};
@@ -13,17 +15,12 @@ struct MinecraftTargets final {
     std::uintptr_t setupAndRender{0};
     std::uintptr_t renderItemGroup{0};
 
-    /*
-     * Reserved for the Atlas renderObject path.
-     *
-     * This is where chest/shulker/ender-chest support will
-     * eventually be connected without redesigning
-     * ItemRenderer again.
-     */
-    std::uintptr_t renderObject{0};
-
     bool viewModelValid() const noexcept {
         return renderItem != 0;
+    }
+
+    bool viewModelSpecialObjectValid() const noexcept {
+        return renderObject != 0;
     }
 
     bool cameraValid() const noexcept {
@@ -39,12 +36,12 @@ struct MinecraftTargets final {
     bool any() const noexcept {
         return
             renderItem != 0 ||
+            renderObject != 0 ||
             getFov != 0 ||
             getPerspective != 0 ||
             localPlayerApplyTurnDelta != 0 ||
             setupAndRender != 0 ||
-            renderItemGroup != 0 ||
-            renderObject != 0;
+            renderItemGroup != 0;
     }
 };
 
