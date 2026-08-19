@@ -44,7 +44,15 @@ private:
         const memory::MemoryRange& text
     ) noexcept;
 
-    static std::uintptr_t resolveSetupAndRender(
+    static std::uintptr_t resolveClientInstanceUpdate(
+        const memory::MemoryRange& text
+    ) noexcept;
+
+    static std::uintptr_t resolveClientInstanceGetLocalPlayer(
+        const memory::MemoryRange& text
+    ) noexcept;
+
+    static std::uintptr_t resolveScreenViewRender(
         const memory::MemoryRange& text
     ) noexcept;
 
