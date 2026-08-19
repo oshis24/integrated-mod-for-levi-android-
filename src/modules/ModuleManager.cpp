@@ -1,8 +1,6 @@
 #include "levi/modules/ModuleManager.hpp"
 
-#include "levi/core/Logger.hpp"
-#include "levi/core/Runtime.hpp"
-
+#include "levi/minecraft/Camera.hpp"
 #include "levi/minecraft/ItemRenderer.hpp"
 #include "levi/minecraft/MinecraftProfile.hpp"
 
@@ -18,10 +16,10 @@ ViewModel g_viewModel;
 Freelook g_freelook;
 ItemPhysics g_itemPhysics;
 
-bool g_profileResolved = false;
-
 minecraft::MinecraftTargets
     g_targets{};
+
+bool g_targetsResolved{false};
 
 std::size_t moduleIndex(
     ModuleId id
@@ -40,60 +38,50 @@ std::size_t moduleIndex(
     return 0;
 }
 
-void tryResolveMinecraft() noexcept {
-    minecraft::MinecraftTargets targets{};
+bool tryResolveMinecraft() noexcept {
+    minecraft::MinecraftTargets
+        targets{};
 
     if (
-        !minecraft::MinecraftProfile::resolve(
-            targets
-        )
+        !minecraft::MinecraftProfile::
+            resolve(targets)
     ) {
-        return;
+        return false;
     }
 
-    g_targets =
-        targets;
+    g_targets = targets;
 
-    /*
-     * ViewModel:
-     *
-     * The RenderItem signature is now ABI-correct and the
-     * native PL hook backend is available when LeviLauncher
-     * exposes the same PL symbols as the working reference.
-     */
     if (
         targets.renderItem != 0 &&
-        !minecraft::ItemRenderer::attached()
+        !minecraft::ItemRenderer::
+            attached()
     ) {
-        if (
-            minecraft::ItemRenderer::attach(
-                targets.renderItem
-            )
-        ) {
-            core::Logger::info(
-                "ViewModel: RenderItem native hook active"
-            );
-        }
+        minecraft::ItemRenderer::attach(
+            targets.renderItem
+        );
     }
 
-    /*
-     * ItemPhysics:
-     *
-     * Keep the two independently discovered world-item
-     * boundaries available to the module.
-     */
+    minecraft::Camera::attach(
+        targets.getPerspective,
+        targets.localPlayerApplyTurnDelta
+    );
+
+    g_viewModel.bindNativeTarget(
+        targets.getFov
+    );
+
     g_itemPhysics.bindNativeTargets(
         targets.setupAndRender,
         targets.renderItemGroup
     );
 
-    /*
-     * Mark profile resolved only after the profile itself has
-     * produced at least one target.
-     */
-    if (targets.any()) {
-        g_profileResolved = true;
-    }
+    g_targetsResolved =
+        targets.renderItem != 0 &&
+        targets.getPerspective != 0 &&
+        targets.localPlayerApplyTurnDelta != 0 &&
+        targets.renderItemGroup != 0;
+
+    return targets.any();
 }
 
 } // namespace
@@ -109,6 +97,7 @@ ModuleManager::ModuleManager()
 ModuleManager&
 ModuleManager::instance() {
     static ModuleManager manager;
+
     return manager;
 }
 
@@ -116,10 +105,6 @@ bool ModuleManager::initialize() noexcept {
     if (initialized_) {
         return true;
     }
-
-    core::Logger::info(
-        "ModuleManager initializing"
-    );
 
     bool success = true;
 
@@ -129,22 +114,25 @@ bool ModuleManager::initialize() noexcept {
             continue;
         }
 
-        if (!module->initialize()) {
-            if (
-                module->status() !=
-                    ModuleStatus::WaitingForRuntime &&
-                module->status() !=
-                    ModuleStatus::WaitingForTarget
-            ) {
-                success = false;
-            }
+        const bool result =
+            module->initialize();
+
+        if (
+            !result &&
+            module->status() !=
+                ModuleStatus::
+                    WaitingForRuntime &&
+            module->status() !=
+                ModuleStatus::
+                    WaitingForTarget
+        ) {
+            success = false;
         }
     }
 
     tryResolveMinecraft();
 
-    initialized_ =
-        success;
+    initialized_ = success;
 
     return success;
 }
@@ -158,22 +146,18 @@ void ModuleManager::shutdown() noexcept {
     g_itemPhysics.disable();
     g_freelook.disable();
 
-    minecraft::ItemRenderer::detach();
-
     for (Module* module : modules_) {
         if (module != nullptr) {
             module->shutdown();
         }
     }
 
-    g_targets =
-        {};
+    minecraft::Camera::detach();
+    minecraft::ItemRenderer::detach();
 
-    g_profileResolved =
-        false;
-
-    initialized_ =
-        false;
+    g_targets = {};
+    g_targetsResolved = false;
+    initialized_ = false;
 }
 
 void ModuleManager::tick(
@@ -183,10 +167,7 @@ void ModuleManager::tick(
         return;
     }
 
-    /*
-     * Keep trying while libminecraftpe.so is loading.
-     */
-    if (!g_profileResolved) {
+    if (!g_targetsResolved) {
         tryResolveMinecraft();
     }
 
@@ -205,9 +186,7 @@ Module* ModuleManager::get(
     const auto index =
         moduleIndex(id);
 
-    if (
-        index >= modules_.size()
-    ) {
+    if (index >= modules_.size()) {
         return nullptr;
     }
 
@@ -221,9 +200,7 @@ ModuleManager::get(
     const auto index =
         moduleIndex(id);
 
-    if (
-        index >= modules_.size()
-    ) {
+    if (index >= modules_.size()) {
         return nullptr;
     }
 
@@ -233,19 +210,19 @@ ModuleManager::get(
 bool ModuleManager::enable(
     ModuleId id
 ) noexcept {
-    Module* module =
-        get(id);
+    Module* module = get(id);
 
-    return
-        module != nullptr &&
-        module->enable();
+    if (module == nullptr) {
+        return false;
+    }
+
+    return module->enable();
 }
 
 void ModuleManager::disable(
     ModuleId id
 ) noexcept {
-    Module* module =
-        get(id);
+    Module* module = get(id);
 
     if (module != nullptr) {
         module->disable();
