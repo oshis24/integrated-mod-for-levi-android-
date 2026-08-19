@@ -51,6 +51,9 @@ bool tryResolveMinecraft() noexcept {
 
     g_targets = targets;
 
+    /*
+     * Generic first-person item path.
+     */
     if (
         targets.renderItem != 0 &&
         !minecraft::ItemRenderer::
@@ -61,22 +64,54 @@ bool tryResolveMinecraft() noexcept {
         );
     }
 
+    /*
+     * Special ItemInHandObject / renderObject path.
+     *
+     * This is the chest-family fix.
+     */
+    if (
+        targets.renderObject != 0 &&
+        !minecraft::ItemRenderer::
+            renderObjectAttached()
+    ) {
+        minecraft::ItemRenderer::
+            attachRenderObject(
+                targets.renderObject
+            );
+    }
+
+    /*
+     * Camera infrastructure.
+     */
     minecraft::Camera::attach(
         targets.getPerspective,
         targets.localPlayerApplyTurnDelta
     );
 
+    /*
+     * ViewModel FOV.
+     */
     g_viewModel.bindNativeTarget(
         targets.getFov
     );
 
+    /*
+     * ItemPhysics world rendering boundaries.
+     */
     g_itemPhysics.bindNativeTargets(
         targets.setupAndRender,
         targets.renderItemGroup
     );
 
+    /*
+     * For the current supported build, all of these should
+     * be present before the integration is considered fully
+     * resolved.
+     */
     g_targetsResolved =
         targets.renderItem != 0 &&
+        targets.renderObject != 0 &&
+        targets.getFov != 0 &&
         targets.getPerspective != 0 &&
         targets.localPlayerApplyTurnDelta != 0 &&
         targets.renderItemGroup != 0;
@@ -101,14 +136,18 @@ ModuleManager::instance() {
     return manager;
 }
 
-bool ModuleManager::initialize() noexcept {
+bool ModuleManager::initialize()
+    noexcept {
     if (initialized_) {
         return true;
     }
 
     bool success = true;
 
-    for (Module* module : modules_) {
+    for (
+        Module* module :
+        modules_
+    ) {
         if (module == nullptr) {
             success = false;
             continue;
@@ -137,7 +176,8 @@ bool ModuleManager::initialize() noexcept {
     return success;
 }
 
-void ModuleManager::shutdown() noexcept {
+void ModuleManager::shutdown()
+    noexcept {
     if (!initialized_) {
         return;
     }
@@ -146,7 +186,10 @@ void ModuleManager::shutdown() noexcept {
     g_itemPhysics.disable();
     g_freelook.disable();
 
-    for (Module* module : modules_) {
+    for (
+        Module* module :
+        modules_
+    ) {
         if (module != nullptr) {
             module->shutdown();
         }
@@ -156,8 +199,12 @@ void ModuleManager::shutdown() noexcept {
     minecraft::ItemRenderer::detach();
 
     g_targets = {};
-    g_targetsResolved = false;
-    initialized_ = false;
+
+    g_targetsResolved =
+        false;
+
+    initialized_ =
+        false;
 }
 
 void ModuleManager::tick(
@@ -171,7 +218,10 @@ void ModuleManager::tick(
         tryResolveMinecraft();
     }
 
-    for (Module* module : modules_) {
+    for (
+        Module* module :
+        modules_
+    ) {
         if (module != nullptr) {
             module->tick(
                 deltaTime
@@ -186,7 +236,10 @@ Module* ModuleManager::get(
     const auto index =
         moduleIndex(id);
 
-    if (index >= modules_.size()) {
+    if (
+        index >=
+        modules_.size()
+    ) {
         return nullptr;
     }
 
@@ -200,7 +253,10 @@ ModuleManager::get(
     const auto index =
         moduleIndex(id);
 
-    if (index >= modules_.size()) {
+    if (
+        index >=
+        modules_.size()
+    ) {
         return nullptr;
     }
 
@@ -210,7 +266,8 @@ ModuleManager::get(
 bool ModuleManager::enable(
     ModuleId id
 ) noexcept {
-    Module* module = get(id);
+    Module* module =
+        get(id);
 
     if (module == nullptr) {
         return false;
@@ -222,7 +279,8 @@ bool ModuleManager::enable(
 void ModuleManager::disable(
     ModuleId id
 ) noexcept {
-    Module* module = get(id);
+    Module* module =
+        get(id);
 
     if (module != nullptr) {
         module->disable();
