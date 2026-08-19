@@ -3,6 +3,7 @@
 #include "levi/core/Logger.hpp"
 #include "levi/core/Runtime.hpp"
 #include "levi/core/State.hpp"
+
 #include "levi/minecraft/ItemRenderer.hpp"
 
 namespace levi::modules {
@@ -34,10 +35,16 @@ bool ViewModel::initialize() noexcept {
         return false;
     }
 
+    enabled_ = false;
+
     transform_.reset();
 
     status_ =
         ModuleStatus::Ready;
+
+    core::Logger::info(
+        "ViewModel initialized"
+    );
 
     return true;
 }
@@ -60,10 +67,7 @@ void ViewModel::tick(
         return;
     }
 
-    /*
-     * Synchronize configuration with the render bridge.
-     */
-    levi::minecraft::ItemRenderer::
+    minecraft::ItemRenderer::
         setViewModelTransform(
             transform_
         );
@@ -77,38 +81,33 @@ bool ViewModel::enable() noexcept {
         return false;
     }
 
-    /*
-     * Do not pretend the native hook exists.
-     *
-     * Module state can be active only once the native
-     * renderer is actually attached.
-     */
     if (
-        !levi::minecraft::ItemRenderer::attached()
+        !minecraft::ItemRenderer::attached()
     ) {
         status_ =
             ModuleStatus::WaitingForTarget;
 
-        levi::core::Logger::warning(
-            "ViewModel: ItemInHandRenderer "
-            "is not attached"
+        core::Logger::warning(
+            "ViewModel: RenderItem hook unavailable"
         );
 
         return false;
     }
 
-    enabled_ = true;
-
-    levi::minecraft::ItemRenderer::
+    minecraft::ItemRenderer::
         setViewModelTransform(
             transform_
         );
 
-    levi::minecraft::ItemRenderer::
-        setViewModelEnabled(true);
+    minecraft::ItemRenderer::
+        setViewModelEnabled(
+            true
+        );
 
-    levi::core::State::instance()
+    core::State::instance()
         .setViewModelEnabled(true);
+
+    enabled_ = true;
 
     status_ =
         ModuleStatus::Active;
@@ -119,10 +118,12 @@ bool ViewModel::enable() noexcept {
 void ViewModel::disable() noexcept {
     enabled_ = false;
 
-    levi::minecraft::ItemRenderer::
-        setViewModelEnabled(false);
+    minecraft::ItemRenderer::
+        setViewModelEnabled(
+            false
+        );
 
-    levi::core::State::instance()
+    core::State::instance()
         .setViewModelEnabled(false);
 
     if (
