@@ -18,7 +18,7 @@ public:
     Hook(
         std::uintptr_t target,
         void* replacement
-    );
+    ) noexcept;
 
     ~Hook();
 
@@ -28,9 +28,9 @@ public:
     Hook(Hook&& other) noexcept;
     Hook& operator=(Hook&& other) noexcept;
 
-    bool install();
+    bool install() noexcept;
 
-    bool remove();
+    bool remove() noexcept;
 
     bool installed() const noexcept;
 
@@ -44,19 +44,8 @@ public:
 
 private:
     std::uintptr_t target_{0};
-
     void* replacement_{nullptr};
-
     void* original_{nullptr};
-
-    /*
-     * Backend state is opaque to the rest of Levi.
-     *
-     * This is deliberately kept as void* so that the public
-     * interface does not depend on the implementation of the
-     * ARM64 hook backend.
-     */
-    void* backendState_{nullptr};
 
     HookStatus status_{
         HookStatus::Uninitialized
