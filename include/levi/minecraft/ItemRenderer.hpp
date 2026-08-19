@@ -2,7 +2,7 @@
 
 #include "levi/math/Transform.hpp"
 #include "levi/memory/Hook.hpp"
-#include "levi/minecraft/RenderContext.hpp"
+#include "levi/minecraft/MatrixStack.hpp"
 
 #include <cstdint>
 
@@ -10,18 +10,6 @@ namespace levi::minecraft {
 
 class ItemRenderer final {
 public:
-    /*
-     * Confirmed BedrockTools RenderItem ABI:
-     *
-     * x0 = this
-     * x1 = RenderContext
-     * x2 = entity
-     * x3 = item
-     * w4 = posAndRotSet
-     * w5 = itemFlags
-     * w6 = useMatrixAsIs
-     * w7 = renderingMainHand
-     */
     using RenderItemFn = void(*)(
         void* self,
         void* renderContext,
@@ -33,7 +21,12 @@ public:
         int renderingMainHand
     );
 
-public:
+    using WorldTransformCallback =
+        void(*)(
+            void* worldItemKey,
+            MatrixStack& matrixStack
+        ) noexcept;
+
     static bool attach(
         std::uintptr_t target
     ) noexcept;
@@ -41,8 +34,6 @@ public:
     static bool detach() noexcept;
 
     static bool attached() noexcept;
-
-    static std::uintptr_t target() noexcept;
 
     static void setViewModelEnabled(
         bool enabled
@@ -52,9 +43,22 @@ public:
         const levi::math::Transform& transform
     ) noexcept;
 
-    static bool viewModelEnabled() noexcept;
+    static void setViewModelPerspective(
+        bool thirdPerson,
+        bool applyThirdPerson
+    ) noexcept;
 
-    static void* original() noexcept;
+    static void setWorldTransformCallback(
+        WorldTransformCallback callback
+    ) noexcept;
+
+    static void beginWorldItemRender(
+        void* worldItemKey
+    ) noexcept;
+
+    static void endWorldItemRender() noexcept;
+
+    static bool inWorldItemRender() noexcept;
 
 private:
     static void renderItemDetour(
@@ -69,19 +73,27 @@ private:
     ) noexcept;
 
 private:
-    inline static memory::Hook hook_{};
+    inline static levi::memory::Hook hook_{};
 
-    inline static std::uintptr_t
-        target_{0};
+    inline static bool attached_{false};
 
-    inline static bool
-        attached_{false};
+    inline static bool viewModelEnabled_{false};
 
-    inline static bool
-        viewModelEnabled_{false};
+    inline static bool thirdPerson_{false};
+
+    inline static bool applyThirdPerson_{false};
 
     inline static levi::math::Transform
-        transform_{};
+        viewModelTransform_{};
+
+    inline static WorldTransformCallback
+        worldTransformCallback_{nullptr};
+
+    inline static thread_local int
+        worldItemDepth_{0};
+
+    inline static thread_local void*
+        worldItemKey_{nullptr};
 };
 
 } // namespace levi::minecraft
