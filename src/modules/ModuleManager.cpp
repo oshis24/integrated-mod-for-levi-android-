@@ -20,7 +20,8 @@ ItemPhysics g_itemPhysics;
 
 bool g_profileResolved = false;
 
-minecraft::MinecraftTargets g_targets{};
+minecraft::MinecraftTargets
+    g_targets{};
 
 std::size_t moduleIndex(
     ModuleId id
@@ -40,10 +41,6 @@ std::size_t moduleIndex(
 }
 
 void tryResolveMinecraft() noexcept {
-    if (g_profileResolved) {
-        return;
-    }
-
     minecraft::MinecraftTargets targets{};
 
     if (
@@ -54,75 +51,49 @@ void tryResolveMinecraft() noexcept {
         return;
     }
 
+    g_targets =
+        targets;
+
     /*
-     * Keep the complete resolution result.
+     * ViewModel:
      *
-     * ItemPhysics consumes setupAndRender and
-     * renderItemGroup.
-     *
-     * ViewModel consumes ItemInHandRenderer.
+     * The RenderItem signature is now ABI-correct and the
+     * native PL hook backend is available when LeviLauncher
+     * exposes the same PL symbols as the working reference.
      */
-    g_targets = targets;
-
     if (
-        targets.itemInHandRenderer != 0
+        targets.renderItem != 0 &&
+        !minecraft::ItemRenderer::attached()
     ) {
-        /*
-         * IMPORTANT:
-         *
-         * ItemRenderer::attach() currently expects the
-         * native renderer OBJECT, while our RE currently
-         * gives us the FUNCTION target.
-         *
-         * Therefore we deliberately do NOT pass the
-         * function address as if it were an object pointer.
-         *
-         * The target is retained for the next native bridge
-         * stage.
-         */
-        levi::core::Logger::info(
-            "ItemInHandRenderer function target resolved: %p",
-            reinterpret_cast<void*>(
-                targets.itemInHandRenderer
+        if (
+            minecraft::ItemRenderer::attach(
+                targets.renderItem
             )
-        );
-    }
-
-    if (
-        targets.setupAndRender != 0
-    ) {
-        g_itemPhysics.bindNativeTargets(
-            targets.setupAndRender,
-            targets.renderItemGroup
-        );
-
-        levi::core::Logger::info(
-            "ItemPhysics setupAndRender target=%p",
-            reinterpret_cast<void*>(
-                targets.setupAndRender
-            )
-        );
-    }
-
-    if (
-        targets.renderItemGroup != 0
-    ) {
-        levi::core::Logger::info(
-            "ItemPhysics renderItemGroup target=%p",
-            reinterpret_cast<void*>(
-                targets.renderItemGroup
-            )
-        );
+        ) {
+            core::Logger::info(
+                "ViewModel: RenderItem native hook active"
+            );
+        }
     }
 
     /*
-     * We consider target resolution complete only after
-     * the profile itself has successfully resolved.
+     * ItemPhysics:
      *
-     * A missing optional target does not invalidate the
-     * entire profile.
+     * Keep the two independently discovered world-item
+     * boundaries available to the module.
      */
-    g_profileResolved = true;
+    g_itemPhysics.bindNativeTargets(
+        targets.setupAndRender,
+        targets.renderItemGroup
+    );
+
+    /*
+     * Mark profile resolved only after the profile itself has
+     * produced at least one target.
+     */
+    if (targets.any()) {
+        g_profileResolved = true;
+    }
 }
 
 } // namespace
@@ -138,7 +109,6 @@ ModuleManager::ModuleManager()
 ModuleManager&
 ModuleManager::instance() {
     static ModuleManager manager;
-
     return manager;
 }
 
@@ -147,8 +117,8 @@ bool ModuleManager::initialize() noexcept {
         return true;
     }
 
-    levi::core::Logger::info(
-        "Initializing module manager"
+    core::Logger::info(
+        "ModuleManager initializing"
     );
 
     bool success = true;
@@ -159,34 +129,22 @@ bool ModuleManager::initialize() noexcept {
             continue;
         }
 
-        const bool result =
-            module->initialize();
-
-        if (
-            !result &&
-            module->status() !=
-                ModuleStatus::WaitingForRuntime &&
-            module->status() !=
-                ModuleStatus::WaitingForTarget
-        ) {
-            success = false;
-
-            levi::core::Logger::error(
-                "Module initialization failed: %s",
-                module->name()
-            );
+        if (!module->initialize()) {
+            if (
+                module->status() !=
+                    ModuleStatus::WaitingForRuntime &&
+                module->status() !=
+                    ModuleStatus::WaitingForTarget
+            ) {
+                success = false;
+            }
         }
     }
 
-    /*
-     * Minecraft may not be loaded yet.
-     *
-     * tryResolveMinecraft() is therefore also called
-     * from tick().
-     */
     tryResolveMinecraft();
 
-    initialized_ = success;
+    initialized_ =
+        success;
 
     return success;
 }
@@ -196,21 +154,10 @@ void ModuleManager::shutdown() noexcept {
         return;
     }
 
-    /*
-     * Disable modules before destroying their native
-     * relationships.
-     */
     g_viewModel.disable();
     g_itemPhysics.disable();
     g_freelook.disable();
 
-    /*
-     * Native renderer hook must be detached before the
-     * target object/function becomes invalid.
-     *
-     * At this stage ItemRenderer only detaches if an actual
-     * hook was installed.
-     */
     minecraft::ItemRenderer::detach();
 
     for (Module* module : modules_) {
@@ -219,13 +166,14 @@ void ModuleManager::shutdown() noexcept {
         }
     }
 
-    g_targets = {};
-    g_profileResolved = false;
-    initialized_ = false;
+    g_targets =
+        {};
 
-    levi::core::Logger::info(
-        "Module manager shutdown complete"
-    );
+    g_profileResolved =
+        false;
+
+    initialized_ =
+        false;
 }
 
 void ModuleManager::tick(
@@ -236,7 +184,7 @@ void ModuleManager::tick(
     }
 
     /*
-     * Minecraft can finish loading after Levi starts.
+     * Keep trying while libminecraftpe.so is loading.
      */
     if (!g_profileResolved) {
         tryResolveMinecraft();
@@ -244,7 +192,9 @@ void ModuleManager::tick(
 
     for (Module* module : modules_) {
         if (module != nullptr) {
-            module->tick(deltaTime);
+            module->tick(
+                deltaTime
+            );
         }
     }
 }
@@ -252,10 +202,12 @@ void ModuleManager::tick(
 Module* ModuleManager::get(
     ModuleId id
 ) noexcept {
-    const std::size_t index =
+    const auto index =
         moduleIndex(id);
 
-    if (index >= modules_.size()) {
+    if (
+        index >= modules_.size()
+    ) {
         return nullptr;
     }
 
@@ -266,10 +218,12 @@ const Module*
 ModuleManager::get(
     ModuleId id
 ) const noexcept {
-    const std::size_t index =
+    const auto index =
         moduleIndex(id);
 
-    if (index >= modules_.size()) {
+    if (
+        index >= modules_.size()
+    ) {
         return nullptr;
     }
 
@@ -279,7 +233,8 @@ ModuleManager::get(
 bool ModuleManager::enable(
     ModuleId id
 ) noexcept {
-    Module* module = get(id);
+    Module* module =
+        get(id);
 
     return
         module != nullptr &&
@@ -289,14 +244,16 @@ bool ModuleManager::enable(
 void ModuleManager::disable(
     ModuleId id
 ) noexcept {
-    Module* module = get(id);
+    Module* module =
+        get(id);
 
     if (module != nullptr) {
         module->disable();
     }
 }
 
-bool ModuleManager::initialized() const noexcept {
+bool ModuleManager::initialized()
+    const noexcept {
     return initialized_;
 }
 
