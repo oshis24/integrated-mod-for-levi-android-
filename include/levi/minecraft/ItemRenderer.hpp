@@ -1,10 +1,8 @@
 #pragma once
 
 #include "levi/math/Transform.hpp"
-#include "levi/minecraft/MatrixStack.hpp"
-#include "levi/minecraft/RenderContext.hpp"
-
 #include "levi/memory/Hook.hpp"
+#include "levi/minecraft/RenderContext.hpp"
 
 #include <cstdint>
 
@@ -12,23 +10,30 @@ namespace levi::minecraft {
 
 class ItemRenderer final {
 public:
-
     /*
-     * This is the native function boundary resolved from
-     * Minecraft 1.26.44.3.
+     * Confirmed BedrockTools RenderItem ABI:
      *
-     * The exact ABI is intentionally kept identical to the
-     * current repository boundary.
+     * x0 = this
+     * x1 = RenderContext
+     * x2 = entity
+     * x3 = item
+     * w4 = posAndRotSet
+     * w5 = itemFlags
+     * w6 = useMatrixAsIs
+     * w7 = renderingMainHand
      */
-    using RenderFirstPersonFn =
-        void(*)(
-            void* self,
-            RenderContext* context,
-            MatrixStack* matrixStack
-        );
+    using RenderItemFn = void(*)(
+        void* self,
+        void* renderContext,
+        void* entity,
+        void* item,
+        int posAndRotSet,
+        int itemFlags,
+        int useMatrixAsIs,
+        int renderingMainHand
+    );
 
 public:
-
     static bool attach(
         std::uintptr_t target
     ) noexcept;
@@ -43,28 +48,28 @@ public:
         bool enabled
     ) noexcept;
 
-    static bool viewModelEnabled() noexcept;
-
     static void setViewModelTransform(
         const levi::math::Transform& transform
     ) noexcept;
 
-    static const levi::math::Transform&
-    viewModelTransform() noexcept;
+    static bool viewModelEnabled() noexcept;
 
     static void* original() noexcept;
 
 private:
-
-    static void hookRenderFirstPerson(
+    static void renderItemDetour(
         void* self,
-        RenderContext* context,
-        MatrixStack* matrixStack
+        void* renderContext,
+        void* entity,
+        void* item,
+        int posAndRotSet,
+        int itemFlags,
+        int useMatrixAsIs,
+        int renderingMainHand
     ) noexcept;
 
 private:
-
-    inline static levi::memory::Hook hook_{};
+    inline static memory::Hook hook_{};
 
     inline static std::uintptr_t
         target_{0};
@@ -76,7 +81,7 @@ private:
         viewModelEnabled_{false};
 
     inline static levi::math::Transform
-        viewModelTransform_{};
+        transform_{};
 };
 
 } // namespace levi::minecraft
