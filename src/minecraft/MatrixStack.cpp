@@ -7,39 +7,32 @@ namespace levi::minecraft {
 
 namespace {
 
-constexpr std::uintptr_t kRenderContextMatrixStackWrapper = 0x28;
-constexpr std::uintptr_t kWrapperMatrixStack = 0x18;
+constexpr std::uintptr_t
+    kRenderContextMatrixStackWrapper = 0x28;
 
-constexpr std::uintptr_t kBlocksOffset = 0x50;
-constexpr std::uintptr_t kStartOffset = 0x68;
-constexpr std::uintptr_t kSizeOffset = 0x70;
+constexpr std::uintptr_t
+    kWrapperMatrixStack = 0x18;
 
-constexpr std::size_t kMatrixBytes = 64;
+constexpr std::uintptr_t
+    kBlocksOffset = 0x50;
 
-constexpr float kPi = 3.14159265358979323846f;
+constexpr std::uintptr_t
+    kStartOffset = 0x68;
 
-void multiplyRight(
-    Matrix4& matrix,
-    const Matrix4& right
-) noexcept {
-    Matrix4 out{};
+constexpr std::uintptr_t
+    kSizeOffset = 0x70;
 
-    for (int column = 0; column < 4; ++column) {
-        for (int row = 0; row < 4; ++row) {
-            float value = 0.0f;
+/*
+ * Confirmed by Atlas renderObject callback.
+ */
+constexpr std::uintptr_t
+    kDirtyOffset = 0x88;
 
-            for (int k = 0; k < 4; ++k) {
-                value +=
-                    matrix.m[k * 4 + row] *
-                    right.m[column * 4 + k];
-            }
+constexpr std::size_t
+    kMatrixBytes = 64;
 
-            out.m[column * 4 + row] = value;
-        }
-    }
-
-    matrix = out;
-}
+constexpr float
+    kPi = 3.14159265358979323846f;
 
 Matrix4 identity() noexcept {
     Matrix4 result{};
@@ -52,13 +45,55 @@ Matrix4 identity() noexcept {
     return result;
 }
 
-void translate(
+void multiplyRight(
+    Matrix4& matrix,
+    const Matrix4& right
+) noexcept {
+    Matrix4 result{};
+
+    for (
+        int column = 0;
+        column < 4;
+        ++column
+    ) {
+        for (
+            int row = 0;
+            row < 4;
+            ++row
+        ) {
+            float value = 0.0f;
+
+            for (
+                int k = 0;
+                k < 4;
+                ++k
+            ) {
+                value +=
+                    matrix.m[
+                        k * 4 + row
+                    ] *
+                    right.m[
+                        column * 4 + k
+                    ];
+            }
+
+            result.m[
+                column * 4 + row
+            ] = value;
+        }
+    }
+
+    matrix = result;
+}
+
+void translateMatrix(
     Matrix4& matrix,
     float x,
     float y,
     float z
 ) noexcept {
-    Matrix4 transform = identity();
+    Matrix4 transform =
+        identity();
 
     transform.m[12] = x;
     transform.m[13] = y;
@@ -70,13 +105,14 @@ void translate(
     );
 }
 
-void scale(
+void scaleMatrix(
     Matrix4& matrix,
     float x,
     float y,
     float z
 ) noexcept {
-    Matrix4 transform = identity();
+    Matrix4 transform =
+        identity();
 
     transform.m[0] = x;
     transform.m[5] = y;
@@ -93,12 +129,18 @@ void rotateX(
     float degrees
 ) noexcept {
     const float radians =
-        degrees * kPi / 180.0f;
+        degrees *
+        kPi /
+        180.0f;
 
-    const float c = std::cos(radians);
-    const float s = std::sin(radians);
+    const float c =
+        std::cos(radians);
 
-    Matrix4 transform = identity();
+    const float s =
+        std::sin(radians);
+
+    Matrix4 transform =
+        identity();
 
     transform.m[5] = c;
     transform.m[6] = s;
@@ -116,12 +158,18 @@ void rotateY(
     float degrees
 ) noexcept {
     const float radians =
-        degrees * kPi / 180.0f;
+        degrees *
+        kPi /
+        180.0f;
 
-    const float c = std::cos(radians);
-    const float s = std::sin(radians);
+    const float c =
+        std::cos(radians);
 
-    Matrix4 transform = identity();
+    const float s =
+        std::sin(radians);
+
+    Matrix4 transform =
+        identity();
 
     transform.m[0] = c;
     transform.m[2] = -s;
@@ -139,12 +187,18 @@ void rotateZ(
     float degrees
 ) noexcept {
     const float radians =
-        degrees * kPi / 180.0f;
+        degrees *
+        kPi /
+        180.0f;
 
-    const float c = std::cos(radians);
-    const float s = std::sin(radians);
+    const float c =
+        std::cos(radians);
 
-    Matrix4 transform = identity();
+    const float s =
+        std::sin(radians);
+
+    Matrix4 transform =
+        identity();
 
     transform.m[0] = c;
     transform.m[1] = s;
@@ -167,7 +221,9 @@ MatrixStack MatrixStack::fromRenderContext(
     }
 
     const auto context =
-        reinterpret_cast<std::uintptr_t>(
+        reinterpret_cast<
+            std::uintptr_t
+        >(
             renderContext
         );
 
@@ -191,10 +247,13 @@ MatrixStack MatrixStack::fromRenderContext(
             kWrapperMatrixStack
         );
 
-    return MatrixStack(stack);
+    return MatrixStack(
+        stack
+    );
 }
 
-Matrix4* MatrixStack::current() const noexcept {
+Matrix4* MatrixStack::current()
+    const noexcept {
     if (!valid()) {
         return nullptr;
     }
@@ -230,19 +289,19 @@ Matrix4* MatrixStack::current() const noexcept {
         return nullptr;
     }
 
-    /*
-     * Same MatrixStack indexing used by the working
-     * BedrockTools ViewModel.
-     */
     const std::size_t last =
         start + size - 1;
 
-    const std::size_t blockOffset =
-        (last >> 3) &
-        ~static_cast<std::size_t>(7);
+    const std::size_t
+        blockOffset =
+            (last >> 3) &
+            ~static_cast<
+                std::size_t
+            >(7);
 
-    const std::size_t elementIndex =
-        last & 0x3F;
+    const std::size_t
+        elementIndex =
+            last & 0x3F;
 
     const auto block =
         *reinterpret_cast<
@@ -258,7 +317,9 @@ Matrix4* MatrixStack::current() const noexcept {
         return nullptr;
     }
 
-    return reinterpret_cast<Matrix4*>(
+    return reinterpret_cast<
+        Matrix4*
+    >(
         block +
         elementIndex *
             kMatrixBytes
@@ -268,7 +329,8 @@ Matrix4* MatrixStack::current() const noexcept {
 bool MatrixStack::snapshot(
     Matrix4& out
 ) const noexcept {
-    const auto* matrix = current();
+    const auto* matrix =
+        current();
 
     if (matrix == nullptr) {
         return false;
@@ -286,7 +348,8 @@ bool MatrixStack::snapshot(
 bool MatrixStack::restore(
     const Matrix4& value
 ) const noexcept {
-    auto* matrix = current();
+    auto* matrix =
+        current();
 
     if (matrix == nullptr) {
         return false;
@@ -298,13 +361,17 @@ bool MatrixStack::restore(
         sizeof(Matrix4)
     );
 
+    markDirty();
+
     return true;
 }
 
 bool MatrixStack::apply(
-    const levi::math::Transform& transform
+    const levi::math::Transform&
+        transform
 ) const noexcept {
-    auto* matrix = current();
+    auto* matrix =
+        current();
 
     if (matrix == nullptr) {
         return false;
@@ -315,7 +382,7 @@ bool MatrixStack::apply(
         transform.translation.y != 0.0f ||
         transform.translation.z != 0.0f
     ) {
-        translate(
+        translateMatrix(
             *matrix,
             transform.translation.x,
             transform.translation.y,
@@ -323,55 +390,57 @@ bool MatrixStack::apply(
         );
     }
 
-    const bool hasRotation =
-        transform.rotation.x != 0.0f ||
-        transform.rotation.y != 0.0f ||
-        transform.rotation.z != 0.0f;
+    const bool hasPivot =
+        transform.pivot.x != 0.0f ||
+        transform.pivot.y != 0.0f ||
+        transform.pivot.z != 0.0f;
 
-    if (hasRotation) {
-        const bool hasPivot =
-            transform.pivot.x != 0.0f ||
-            transform.pivot.y != 0.0f ||
-            transform.pivot.z != 0.0f;
+    if (hasPivot) {
+        translateMatrix(
+            *matrix,
+            transform.pivot.x,
+            transform.pivot.y,
+            transform.pivot.z
+        );
+    }
 
-        if (hasPivot) {
-            translate(
-                *matrix,
-                transform.pivot.x,
-                transform.pivot.y,
-                transform.pivot.z
-            );
-        }
+    if (
+        transform.rotation.x !=
+        0.0f
+    ) {
+        rotateX(
+            *matrix,
+            transform.rotation.x
+        );
+    }
 
-        if (transform.rotation.x != 0.0f) {
-            rotateX(
-                *matrix,
-                transform.rotation.x
-            );
-        }
+    if (
+        transform.rotation.y !=
+        0.0f
+    ) {
+        rotateY(
+            *matrix,
+            transform.rotation.y
+        );
+    }
 
-        if (transform.rotation.y != 0.0f) {
-            rotateY(
-                *matrix,
-                transform.rotation.y
-            );
-        }
+    if (
+        transform.rotation.z !=
+        0.0f
+    ) {
+        rotateZ(
+            *matrix,
+            transform.rotation.z
+        );
+    }
 
-        if (transform.rotation.z != 0.0f) {
-            rotateZ(
-                *matrix,
-                transform.rotation.z
-            );
-        }
-
-        if (hasPivot) {
-            translate(
-                *matrix,
-                -transform.pivot.x,
-                -transform.pivot.y,
-                -transform.pivot.z
-            );
-        }
+    if (hasPivot) {
+        translateMatrix(
+            *matrix,
+            -transform.pivot.x,
+            -transform.pivot.y,
+            -transform.pivot.z
+        );
     }
 
     if (
@@ -379,7 +448,7 @@ bool MatrixStack::apply(
         transform.scale.y != 1.0f ||
         transform.scale.z != 1.0f
     ) {
-        scale(
+        scaleMatrix(
             *matrix,
             transform.scale.x,
             transform.scale.y,
@@ -387,7 +456,26 @@ bool MatrixStack::apply(
         );
     }
 
+    /*
+     * This is essential for the special object path.
+     */
+    markDirty();
+
     return true;
+}
+
+void MatrixStack::markDirty()
+    const noexcept {
+    if (!valid()) {
+        return;
+    }
+
+    *reinterpret_cast<
+        volatile std::uint8_t*
+    >(
+        address_ +
+        kDirtyOffset
+    ) = 1;
 }
 
 } // namespace levi::minecraft
