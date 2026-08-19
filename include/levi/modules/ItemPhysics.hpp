@@ -11,16 +11,6 @@ namespace levi::modules {
 
 class ItemPhysics final : public Module {
 public:
-    using SetupAndRenderFn =
-        void(*)(
-            void* self,
-            void* context
-        );
-
-    /*
-     * ABI reconstructed from the working ItemPhysic
-     * detour.
-     */
     using RenderItemGroupFn =
         void(*)(
             void* self,
@@ -41,21 +31,25 @@ public:
     }
 
     bool initialize() noexcept override;
+
     void shutdown() noexcept override;
+
     void tick(float deltaTime) noexcept override;
 
     bool enable() noexcept override;
+
     void disable() noexcept override;
 
     bool enabled() const noexcept override;
+
     ModuleStatus status() const noexcept override;
 
-    void bindNativeTargets(
-        std::uintptr_t setupAndRender,
+    void bindNativeTarget(
         std::uintptr_t renderItemGroup
     ) noexcept;
 
-    bool hooksInstalled() const noexcept;
+    bool hookInstalled()
+        const noexcept;
 
 private:
     struct OrientationEntry final {
@@ -67,11 +61,6 @@ private:
 
         bool valid{false};
     };
-
-    static void setupAndRenderDetour(
-        void* self,
-        void* context
-    ) noexcept;
 
     static void renderItemGroupDetour(
         void* self,
@@ -85,26 +74,27 @@ private:
 
     static void worldTransformCallback(
         void* worldItem,
-        levi::minecraft::MatrixStack& matrixStack
+        levi::minecraft::MatrixStack&
+            matrixStack
     ) noexcept;
 
     void applyStableOrientation(
         void* worldItem,
-        levi::minecraft::MatrixStack& matrixStack
+        levi::minecraft::MatrixStack&
+            matrixStack
     ) noexcept;
 
-    OrientationEntry* findOrCreateEntry(
+    OrientationEntry*
+    findOrCreateEntry(
         void* key
     ) noexcept;
 
-    void expireOldEntries() noexcept;
+    void expireOldEntries()
+        noexcept;
 
 private:
     inline static ItemPhysics*
         active_{nullptr};
-
-    levi::memory::Hook
-        setupHook_{};
 
     levi::memory::Hook
         groupHook_{};
@@ -114,7 +104,8 @@ private:
         128
     > orientationCache_{};
 
-    std::uint64_t frameCounter_{0};
+    std::uint64_t
+        frameCounter_{0};
 
     bool enabled_{false};
 
