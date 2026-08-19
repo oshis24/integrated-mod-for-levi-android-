@@ -15,21 +15,25 @@ public:
     }
 
     bool initialize() noexcept override;
+
     void shutdown() noexcept override;
+
     void tick(float deltaTime) noexcept override;
 
     bool enable() noexcept override;
+
     void disable() noexcept override;
 
     bool enabled() const noexcept override;
+
     ModuleStatus status() const noexcept override;
 
     float yaw() const noexcept {
-        return yaw_;
+        return yawOffset_;
     }
 
     float pitch() const noexcept {
-        return pitch_;
+        return pitchOffset_;
     }
 
     void resetRotation() noexcept;
@@ -38,6 +42,10 @@ public:
         float value
     ) noexcept {
         sensitivity_ = value;
+    }
+
+    float sensitivity() const noexcept {
+        return sensitivity_;
     }
 
 private:
@@ -50,14 +58,31 @@ private:
         int originalPerspective
     ) noexcept;
 
+    static bool visualRotationProvider(
+        float vanillaPitch,
+        float vanillaYaw,
+        float& outPitch,
+        float& outYaw
+    ) noexcept;
+
+    static float wrapYaw(
+        float value
+    ) noexcept;
+
 private:
     inline static Freelook*
         active_{nullptr};
 
     bool enabled_{false};
 
-    float yaw_{0.0f};
-    float pitch_{0.0f};
+    bool visualInitialized_{false};
+
+    float basePitch_{0.0f};
+    float baseYaw_{0.0f};
+
+    float pitchOffset_{0.0f};
+    float yawOffset_{0.0f};
+
     float sensitivity_{1.0f};
 
     int lockedPerspective_{0};
