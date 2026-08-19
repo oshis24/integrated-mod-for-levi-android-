@@ -5,14 +5,20 @@
 namespace levi::minecraft {
 
 struct MinecraftTargets final {
+    // ViewModel
     std::uintptr_t renderItem{0};
     std::uintptr_t renderObject{0};
-
     std::uintptr_t getFov{0};
+
+    // Camera / Freelook
     std::uintptr_t getPerspective{0};
     std::uintptr_t localPlayerApplyTurnDelta{0};
 
-    std::uintptr_t setupAndRender{0};
+    std::uintptr_t clientInstanceUpdate{0};
+    std::uintptr_t clientInstanceGetLocalPlayer{0};
+    std::uintptr_t screenViewRender{0};
+
+    // ItemPhysics
     std::uintptr_t renderItemGroup{0};
 
     bool viewModelValid() const noexcept {
@@ -23,10 +29,13 @@ struct MinecraftTargets final {
         return renderObject != 0;
     }
 
-    bool cameraValid() const noexcept {
+    bool freelookValid() const noexcept {
         return
             getPerspective != 0 &&
-            localPlayerApplyTurnDelta != 0;
+            localPlayerApplyTurnDelta != 0 &&
+            clientInstanceUpdate != 0 &&
+            clientInstanceGetLocalPlayer != 0 &&
+            screenViewRender != 0;
     }
 
     bool itemPhysicsValid() const noexcept {
@@ -40,7 +49,9 @@ struct MinecraftTargets final {
             getFov != 0 ||
             getPerspective != 0 ||
             localPlayerApplyTurnDelta != 0 ||
-            setupAndRender != 0 ||
+            clientInstanceUpdate != 0 ||
+            clientInstanceGetLocalPlayer != 0 ||
+            screenViewRender != 0 ||
             renderItemGroup != 0;
     }
 };
