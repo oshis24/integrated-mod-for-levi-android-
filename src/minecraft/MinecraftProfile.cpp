@@ -10,12 +10,6 @@ namespace levi::minecraft {
 
 namespace {
 
-/*
- * RenderItem
- *
- * Verified from BedrockTools and current
- * Minecraft 1.26.44.3.
- */
 constexpr const char* kRenderItemPattern =
     "? ? ? FC "
     "? ? ? 6D "
@@ -32,27 +26,6 @@ constexpr const char* kRenderItemPattern =
     "58 D0 3B D5 "
     "? ? ? F9";
 
-/*
- * Atlas-equivalent renderObject.
- *
- * Current Minecraft 1.26.44.3:
- *
- *      0xADDFE80
- *
- * The full 40-byte prefix was checked against .text and
- * occurs exactly once.
- *
- * ARM64 ABI:
- *
- * x0 = renderer/self
- * x1 = RenderContext
- * x2 = render object
- * x3 = item/model information
- * w4 = render flag
- *
- * Return value:
- * x0 = pointer-like result
- */
 constexpr const char* kRenderObjectPattern =
     "FD 7B BA A9 "
     "FC 6F 01 A9 "
@@ -65,9 +38,6 @@ constexpr const char* kRenderObjectPattern =
     "5B D0 3B D5 "
     "F8 03 02 AA";
 
-/*
- * ViewModel item FOV.
- */
 constexpr const char* kGetFovPattern =
     "? ? ? FC "
     "? ? ? 6D "
@@ -77,11 +47,6 @@ constexpr const char* kGetFovPattern =
     "? ? ? 91 "
     "08 40 20 1E";
 
-/*
- * VanillaCameraAPI::GetPerspective
- *
- * Also confirmed by vtable +0x38 / index 7.
- */
 constexpr const char* kGetPerspectivePattern =
     "? ? ? A9 "
     "FD 03 00 91 "
@@ -96,11 +61,6 @@ constexpr const char* kGetPerspectivePattern =
     "? ? ? A9 "
     "FD 03 00 91";
 
-/*
- * LocalPlayer::applyTurnDelta
- *
- * Used by the Freelook input/body-rotation split.
- */
 constexpr const char* kApplyTurnDeltaPattern =
     "? ? ? D1 "
     "? ? ? FD "
@@ -118,25 +78,82 @@ constexpr const char* kApplyTurnDeltaPattern =
     "? ? ? F9";
 
 /*
- * Reconstructed from the working ItemPhysic Levi module.
+ * BedrockTools:
+ *
+ * ClientInstanceUpdate
+ *
+ * Current Minecraft:
+ * 0x943ECF4
  */
-constexpr const char* kSetupAndRenderPattern =
-    "EC 0F 17 FC "
-    "EB 2B 01 6D "
-    "E9 23 02 6D "
-    "FD 7B 03 A9 "
-    "FC 6F 04 A9 "
-    "FA 67 05 A9 "
-    "F8 5F 06 A9 "
-    "F6 57 07 A9 "
-    "F4 4F 08 A9 "
-    "FD C3 00 91 "
-    "FF 03 09 D1 "
-    "?? ?? ?? D5 "
+constexpr const char* kClientInstanceUpdatePattern =
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "FD 03 00 91 "
+    "? ? ? D1 "
+    "59 D0 3B D5 "
+    "F3 03 00 AA "
+    "F4 03 01 2A "
+    "? ? ? F9 "
+    "? ? ? F8 "
+    "? ? ? F9 "
+    "? ? ? F9";
+
+/*
+ * BedrockTools:
+ *
+ * ClientInstanceGetLocalPlayer
+ *
+ * Current Minecraft:
+ * 0x9443404
+ */
+constexpr const char*
+kClientInstanceGetLocalPlayerPattern =
+    "? ? ? D1 "
+    "? ? ? A9 "
+    "? ? ? F9 "
+    "? ? ? 91 "
+    "53 D0 3B D5 "
+    "E8 03 00 AA "
+    "? ? ? 91 "
+    "? ? ? F9 "
+    "? ? ? 91 "
+    "? ? ? F8 "
+    "? ? ? 95 "
+    "? ? ? 91 "
+    "? ? ? 95 "
+    "? ? ? 36 "
+    "? ? ? 91 "
+    "? ? ? 52 "
+    "? ? ? 94";
+
+/*
+ * Working Freelook + BedrockTools shared ScreenView
+ * rendering boundary.
+ *
+ * Current Minecraft:
+ * 0x96EDD34
+ */
+constexpr const char* kScreenViewRenderPattern =
+    "? ? ? FC "
+    "? ? ? 6D "
+    "? ? ? 6D "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? 91 "
+    "? ? ? D1 "
+    "48 D0 3B D5 "
     "FC 03 00 AA";
 
 /*
- * Working ItemPhysic renderItemGroup boundary.
+ * ItemPhysic world-item boundary.
  */
 constexpr const char* kRenderItemGroupPattern =
     "FF C3 02 D1 "
@@ -160,7 +177,7 @@ std::uintptr_t scan(
         return 0;
     }
 
-    const memory::Pattern parsed(
+    memory::Pattern parsed(
         pattern
     );
 
@@ -185,12 +202,11 @@ bool MinecraftProfile::supported() noexcept {
 bool MinecraftProfile::libraryLoaded() noexcept {
     memory::MemoryRange text{};
 
-    return
-        memory::PatternScanner::
-            findTextRange(
-                kLibrary,
-                text
-            );
+    return memory::PatternScanner::
+        findTextRange(
+            kLibrary,
+            text
+        );
 }
 
 std::uintptr_t
@@ -244,12 +260,32 @@ MinecraftProfile::resolveLocalPlayerApplyTurnDelta(
 }
 
 std::uintptr_t
-MinecraftProfile::resolveSetupAndRender(
+MinecraftProfile::resolveClientInstanceUpdate(
     const memory::MemoryRange& text
 ) noexcept {
     return scan(
         text,
-        kSetupAndRenderPattern
+        kClientInstanceUpdatePattern
+    );
+}
+
+std::uintptr_t
+MinecraftProfile::resolveClientInstanceGetLocalPlayer(
+    const memory::MemoryRange& text
+) noexcept {
+    return scan(
+        text,
+        kClientInstanceGetLocalPlayerPattern
+    );
+}
+
+std::uintptr_t
+MinecraftProfile::resolveScreenViewRender(
+    const memory::MemoryRange& text
+) noexcept {
+    return scan(
+        text,
+        kScreenViewRenderPattern
     );
 }
 
@@ -285,32 +321,34 @@ bool MinecraftProfile::resolve(
     }
 
     targets.renderItem =
-        resolveRenderItem(
-            text
-        );
+        resolveRenderItem(text);
 
     targets.renderObject =
-        resolveRenderObject(
-            text
-        );
+        resolveRenderObject(text);
 
     targets.getFov =
-        resolveGetFov(
-            text
-        );
+        resolveGetFov(text);
 
     targets.getPerspective =
-        resolveGetPerspective(
-            text
-        );
+        resolveGetPerspective(text);
 
     targets.localPlayerApplyTurnDelta =
         resolveLocalPlayerApplyTurnDelta(
             text
         );
 
-    targets.setupAndRender =
-        resolveSetupAndRender(
+    targets.clientInstanceUpdate =
+        resolveClientInstanceUpdate(
+            text
+        );
+
+    targets.clientInstanceGetLocalPlayer =
+        resolveClientInstanceGetLocalPlayer(
+            text
+        );
+
+    targets.screenViewRender =
+        resolveScreenViewRender(
             text
         );
 
@@ -325,49 +363,63 @@ bool MinecraftProfile::resolve(
     );
 
     core::Logger::info(
-        "  RenderItem                = %p",
+        "RenderItem              = %p",
         reinterpret_cast<void*>(
             targets.renderItem
         )
     );
 
     core::Logger::info(
-        "  RenderObject              = %p",
+        "RenderObject            = %p",
         reinterpret_cast<void*>(
             targets.renderObject
         )
     );
 
     core::Logger::info(
-        "  GetFov                    = %p",
+        "GetFov                  = %p",
         reinterpret_cast<void*>(
             targets.getFov
         )
     );
 
     core::Logger::info(
-        "  GetPerspective            = %p",
+        "GetPerspective          = %p",
         reinterpret_cast<void*>(
             targets.getPerspective
         )
     );
 
     core::Logger::info(
-        "  LocalPlayerApplyTurnDelta = %p",
+        "ApplyTurnDelta          = %p",
         reinterpret_cast<void*>(
             targets.localPlayerApplyTurnDelta
         )
     );
 
     core::Logger::info(
-        "  setupAndRender            = %p",
+        "ClientInstanceUpdate    = %p",
         reinterpret_cast<void*>(
-            targets.setupAndRender
+            targets.clientInstanceUpdate
         )
     );
 
     core::Logger::info(
-        "  renderItemGroup           = %p",
+        "GetLocalPlayer          = %p",
+        reinterpret_cast<void*>(
+            targets.clientInstanceGetLocalPlayer
+        )
+    );
+
+    core::Logger::info(
+        "ScreenView::render      = %p",
+        reinterpret_cast<void*>(
+            targets.screenViewRender
+        )
+    );
+
+    core::Logger::info(
+        "renderItemGroup         = %p",
         reinterpret_cast<void*>(
             targets.renderItemGroup
         )
