@@ -1,63 +1,86 @@
 #pragma once
 
-#include "levi/math/Vec3.hpp"
+#include "levi/memory/Hook.hpp"
 
 #include <cstdint>
 
 namespace levi::minecraft {
 
+struct TurnDelta final {
+    float x{0.0f};
+    float y{0.0f};
+};
+
 class Camera final {
 public:
-    Camera() = default;
+    using GetPerspectiveFn =
+        int(*)(void* self);
 
-    explicit Camera(
-        std::uintptr_t address
-    )
-        : address_(address) {
-    }
+    using ApplyTurnDeltaFn =
+        void(*)(
+            void* player,
+            TurnDelta* delta
+        );
 
-    bool valid() const noexcept {
-        return address_ != 0;
-    }
+    using PerspectiveObserver =
+        void(*)(int perspective) noexcept;
 
-    std::uintptr_t address() const noexcept {
-        return address_;
-    }
+    using PerspectiveOverride =
+        int(*)(int originalPerspective) noexcept;
 
-    /*
-     * Camera state used by Freelook.
-     *
-     * These are client-side values, not assumed native
-     * object offsets.
-     */
-    float yaw() const noexcept {
-        return yaw_;
-    }
+    using TurnDeltaHandler =
+        bool(*)(
+            float x,
+            float y
+        ) noexcept;
 
-    float pitch() const noexcept {
-        return pitch_;
-    }
-
-    void setYaw(float value) noexcept {
-        yaw_ = value;
-    }
-
-    void setPitch(float value) noexcept {
-        pitch_ = value;
-    }
-
-    void addRotation(
-        float yawDelta,
-        float pitchDelta
+    static bool attach(
+        std::uintptr_t getPerspective,
+        std::uintptr_t applyTurnDelta
     ) noexcept;
 
-    void resetRotation() noexcept;
+    static void detach() noexcept;
+
+    static bool perspectiveHooked() noexcept;
+    static bool turnHooked() noexcept;
+
+    static void setPerspectiveObserver(
+        PerspectiveObserver observer
+    ) noexcept;
+
+    static void setPerspectiveOverride(
+        PerspectiveOverride callback
+    ) noexcept;
+
+    static void setTurnDeltaHandler(
+        TurnDeltaHandler callback
+    ) noexcept;
 
 private:
-    std::uintptr_t address_{0};
+    static int perspectiveDetour(
+        void* self
+    ) noexcept;
 
-    float yaw_{0.0f};
-    float pitch_{0.0f};
+    static void turnDeltaDetour(
+        void* player,
+        TurnDelta* delta
+    ) noexcept;
+
+private:
+    inline static levi::memory::Hook
+        perspectiveHook_{};
+
+    inline static levi::memory::Hook
+        turnHook_{};
+
+    inline static PerspectiveObserver
+        perspectiveObserver_{nullptr};
+
+    inline static PerspectiveOverride
+        perspectiveOverride_{nullptr};
+
+    inline static TurnDeltaHandler
+        turnHandler_{nullptr};
 };
 
 } // namespace levi::minecraft
