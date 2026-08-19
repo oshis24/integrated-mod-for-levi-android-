@@ -1,18 +1,58 @@
 #include "levi/minecraft/ItemRenderer.hpp"
 
 #include "levi/core/Logger.hpp"
+#include "levi/minecraft/MatrixStack.hpp"
 
 namespace levi::minecraft {
+
+namespace {
+
+MatrixStack resolveMatrixStack(
+    void* renderContext
+) noexcept {
+    /*
+     * BedrockTools Render layout:
+     *
+     * RenderContext
+     *     +0x28 -> MatrixStackWrapper
+     *
+     * MatrixStackWrapper
+     *     +0x18 -> MatrixStack
+     *
+     * We only use this when the pointers are non-null.
+     */
+    if (renderContext == nullptr) {
+        return {};
+    }
+
+    const auto context =
+        reinterpret_cast<
+            std::uintptr_t
+        >(renderContext);
+
+    const auto wrapper =
+        *reinterpret_cast<
+            std::uintptr_t*
+        >(context + 0x28);
+
+    if (wrapper == 0) {
+        return {};
+    }
+
+    const auto stack =
+        *reinterpret_cast<
+            std::uintptr_t*
+        >(wrapper + 0x18);
+
+    return MatrixStack(stack);
+}
+
+} // namespace
 
 bool ItemRenderer::attach(
     std::uintptr_t target
 ) noexcept {
-
     if (target == 0) {
-        levi::core::Logger::error(
-            "ItemRenderer: invalid render target"
-        );
-
         return false;
     }
 
@@ -21,16 +61,16 @@ bool ItemRenderer::attach(
     }
 
     hook_ =
-        levi::memory::Hook(
+        memory::Hook(
             target,
             reinterpret_cast<void*>(
-                &ItemRenderer::hookRenderFirstPerson
+                &ItemRenderer::renderItemDetour
             )
         );
 
     if (!hook_.install()) {
-        levi::core::Logger::error(
-            "ItemRenderer: ARM64 hook installation failed"
+        core::Logger::error(
+            "ItemRenderer: RenderItem hook failed"
         );
 
         return false;
@@ -39,10 +79,11 @@ bool ItemRenderer::attach(
     target_ = target;
     attached_ = true;
 
-    levi::core::Logger::info(
-        "ItemRenderer: native renderFirstPerson hook active "
-        "target=%p",
-        reinterpret_cast<void*>(target_)
+    core::Logger::info(
+        "ItemRenderer: RenderItem hook installed %p",
+        reinterpret_cast<void*>(
+            target_
+        )
     );
 
     return true;
@@ -64,8 +105,9 @@ bool ItemRenderer::detach() noexcept {
 }
 
 bool ItemRenderer::attached() noexcept {
-    return attached_ &&
-           hook_.installed();
+    return
+        attached_ &&
+        hook_.installed();
 }
 
 std::uintptr_t
@@ -79,33 +121,32 @@ void ItemRenderer::setViewModelEnabled(
     viewModelEnabled_ = enabled;
 }
 
-bool ItemRenderer::viewModelEnabled() noexcept {
-    return viewModelEnabled_;
-}
-
 void ItemRenderer::setViewModelTransform(
     const levi::math::Transform& transform
 ) noexcept {
-    viewModelTransform_ = transform;
+    transform_ = transform;
 }
 
-const levi::math::Transform&
-ItemRenderer::viewModelTransform() noexcept {
-    return viewModelTransform_;
+bool ItemRenderer::viewModelEnabled() noexcept {
+    return viewModelEnabled_;
 }
 
 void* ItemRenderer::original() noexcept {
     return hook_.original();
 }
 
-void ItemRenderer::hookRenderFirstPerson(
+void ItemRenderer::renderItemDetour(
     void* self,
-    RenderContext* context,
-    MatrixStack* matrixStack
+    void* renderContext,
+    void* entity,
+    void* item,
+    int posAndRotSet,
+    int itemFlags,
+    int useMatrixAsIs,
+    int renderingMainHand
 ) noexcept {
-
     const auto original =
-        reinterpret_cast<RenderFirstPersonFn>(
+        reinterpret_cast<RenderItemFn>(
             hook_.original()
         );
 
@@ -114,50 +155,79 @@ void ItemRenderer::hookRenderFirstPerson(
     }
 
     /*
-     * Never touch the native stack if the MatrixStack
-     * object was not supplied by Minecraft.
+     * We only transform first-person main-hand rendering.
+     *
+     * Off-hand / world rendering remains untouched here.
      */
     if (
         !viewModelEnabled_ ||
-        matrixStack == nullptr ||
-        !matrixStack->valid()
+        renderingMainHand == 0
     ) {
         original(
             self,
-            context,
-            matrixStack
+            renderContext,
+            entity,
+            item,
+            posAndRotSet,
+            itemFlags,
+            useMatrixAsIs,
+            renderingMainHand
+        );
+
+        return;
+    }
+
+    auto matrixStack =
+        resolveMatrixStack(
+            renderContext
+        );
+
+    if (!matrixStack.valid()) {
+        original(
+            self,
+            renderContext,
+            entity,
+            item,
+            posAndRotSet,
+            itemFlags,
+            useMatrixAsIs,
+            renderingMainHand
         );
 
         return;
     }
 
     /*
-     * Critical invariant:
+     * Main ViewModel implementation:
      *
-     *       push
-     *          ↓
-     *      ViewModel
-     *          ↓
-     *      vanilla render
-     *          ↓
-     *        pop
-     *
-     * This prevents ViewModel from leaking its transform
-     * into subsequent rendering.
+     *     push
+     *        |
+     *        +-- translation
+     *        +-- rotation
+     *        +-- scale
+     *        |
+     *     original RenderItem
+     *        |
+     *      pop
      */
-    matrixStack->push();
+    matrixStack.push();
 
-    matrixStack->apply(
-        viewModelTransform_
+    matrixStack.apply(
+        transform_
     );
 
     original(
         self,
-        context,
-        matrixStack
+        renderContext,
+        entity,
+        item,
+        posAndRotSet,
+        itemFlags,
+        useMatrixAsIs,
+        renderingMainHand
     );
 
-    matrixStack->pop();
+    matrixStack.pop();
 }
 
 } // namespace levi::minecraft
