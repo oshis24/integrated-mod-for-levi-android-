@@ -3,7 +3,7 @@
 #include "levi/core/Logger.hpp"
 #include "levi/core/Runtime.hpp"
 #include "levi/core/State.hpp"
-
+#include "levi/minecraft/Camera.hpp"
 #include "levi/minecraft/ItemRenderer.hpp"
 
 namespace levi::modules {
@@ -35,24 +35,54 @@ bool ViewModel::initialize() noexcept {
         return false;
     }
 
-    enabled_ = false;
+    active_ = this;
 
     transform_.reset();
+
+    levi::minecraft::Camera::
+        setPerspectiveObserver(
+            &ViewModel::onPerspective
+        );
 
     status_ =
         ModuleStatus::Ready;
 
-    core::Logger::info(
-        "ViewModel initialized"
-    );
-
     return true;
+}
+
+void ViewModel::bindNativeTarget(
+    std::uintptr_t getFov
+) noexcept {
+    if (
+        getFov == 0 ||
+        fovHook_.installed()
+    ) {
+        return;
+    }
+
+    fovHook_ =
+        levi::memory::Hook(
+            getFov,
+            reinterpret_cast<void*>(
+                &ViewModel::fovDetour
+            )
+        );
+
+    if (!fovHook_.install()) {
+        levi::core::Logger::warning(
+            "ViewModel: GetFov hook unavailable"
+        );
+    }
 }
 
 void ViewModel::shutdown() noexcept {
     disable();
 
-    transform_.reset();
+    fovHook_.remove();
+
+    if (active_ == this) {
+        active_ = nullptr;
+    }
 
     status_ =
         ModuleStatus::Disabled;
@@ -67,47 +97,49 @@ void ViewModel::tick(
         return;
     }
 
-    minecraft::ItemRenderer::
+    levi::minecraft::ItemRenderer::
         setViewModelTransform(
             transform_
+        );
+
+    levi::minecraft::ItemRenderer::
+        setViewModelPerspective(
+            thirdPerson_,
+            applyThirdPerson_
         );
 }
 
 bool ViewModel::enable() noexcept {
     if (
-        status_ != ModuleStatus::Ready &&
-        status_ != ModuleStatus::Active
-    ) {
-        return false;
-    }
-
-    if (
-        !minecraft::ItemRenderer::attached()
+        !levi::minecraft::ItemRenderer::
+            attached()
     ) {
         status_ =
             ModuleStatus::WaitingForTarget;
 
-        core::Logger::warning(
-            "ViewModel: RenderItem hook unavailable"
-        );
-
         return false;
     }
 
-    minecraft::ItemRenderer::
-        setViewModelTransform(
-            transform_
-        );
+    enabled_ = true;
 
-    minecraft::ItemRenderer::
+    levi::minecraft::ItemRenderer::
         setViewModelEnabled(
             true
         );
 
-    core::State::instance()
-        .setViewModelEnabled(true);
+    levi::minecraft::ItemRenderer::
+        setViewModelTransform(
+            transform_
+        );
 
-    enabled_ = true;
+    levi::minecraft::ItemRenderer::
+        setViewModelPerspective(
+            thirdPerson_,
+            applyThirdPerson_
+        );
+
+    levi::core::State::instance()
+        .setViewModelEnabled(true);
 
     status_ =
         ModuleStatus::Active;
@@ -118,12 +150,12 @@ bool ViewModel::enable() noexcept {
 void ViewModel::disable() noexcept {
     enabled_ = false;
 
-    minecraft::ItemRenderer::
+    levi::minecraft::ItemRenderer::
         setViewModelEnabled(
             false
         );
 
-    core::State::instance()
+    levi::core::State::instance()
         .setViewModelEnabled(false);
 
     if (
@@ -141,6 +173,61 @@ bool ViewModel::enabled() const noexcept {
 ModuleStatus
 ViewModel::status() const noexcept {
     return status_;
+}
+
+float ViewModel::fovDetour(
+    void* self,
+    float value,
+    int enableVariableFov
+) noexcept {
+    auto* module = active_;
+
+    const auto original =
+        module != nullptr
+            ? reinterpret_cast<GetFovFn>(
+                module->fovHook_.original()
+            )
+            : nullptr;
+
+    float result =
+        original != nullptr
+            ? original(
+                self,
+                value,
+                enableVariableFov
+            )
+            : 0.0f;
+
+    if (
+        module != nullptr &&
+        module->enabled_ &&
+        result >= 69.5f &&
+        result <= 70.5f
+    ) {
+        result =
+            module->itemFov_;
+    }
+
+    return result;
+}
+
+void ViewModel::onPerspective(
+    int perspective
+) noexcept {
+    auto* module = active_;
+
+    if (module == nullptr) {
+        return;
+    }
+
+    module->thirdPerson_ =
+        perspective != 0;
+
+    levi::minecraft::ItemRenderer::
+        setViewModelPerspective(
+            module->thirdPerson_,
+            module->applyThirdPerson_
+        );
 }
 
 } // namespace levi::modules
