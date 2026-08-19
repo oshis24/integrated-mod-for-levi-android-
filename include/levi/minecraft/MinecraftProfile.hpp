@@ -28,6 +28,10 @@ private:
         const memory::MemoryRange& text
     ) noexcept;
 
+    static std::uintptr_t resolveRenderObject(
+        const memory::MemoryRange& text
+    ) noexcept;
+
     static std::uintptr_t resolveGetFov(
         const memory::MemoryRange& text
     ) noexcept;
