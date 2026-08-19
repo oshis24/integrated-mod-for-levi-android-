@@ -1,5 +1,7 @@
 #include "levi/modules/ModuleManager.hpp"
 
+#include "levi/core/Logger.hpp"
+
 #include "levi/minecraft/Camera.hpp"
 #include "levi/minecraft/ItemRenderer.hpp"
 #include "levi/minecraft/MinecraftProfile.hpp"
@@ -38,83 +40,128 @@ std::size_t moduleIndex(
     return 0;
 }
 
-bool tryResolveMinecraft() noexcept {
+bool tryResolveMinecraft()
+    noexcept {
     minecraft::MinecraftTargets
         targets{};
 
     if (
         !minecraft::MinecraftProfile::
-            resolve(targets)
+            resolve(
+                targets
+            )
     ) {
         return false;
     }
 
-    g_targets = targets;
+    g_targets =
+        targets;
 
     /*
-     * Generic first-person item path.
+     * -------------------------------------------------
+     * ViewModel
+     * -------------------------------------------------
      */
+
     if (
         targets.renderItem != 0 &&
         !minecraft::ItemRenderer::
             attached()
     ) {
-        minecraft::ItemRenderer::attach(
-            targets.renderItem
-        );
+        if (
+            minecraft::ItemRenderer::
+                attach(
+                    targets.renderItem
+                )
+        ) {
+            core::Logger::info(
+                "ModuleManager: "
+                "RenderItem attached"
+            );
+        }
     }
 
     /*
-     * Special ItemInHandObject / renderObject path.
+     * Special ItemInHandObject path.
      *
-     * This is the chest-family fix.
+     * Required for chest-family and other special-model
+     * first-person items.
      */
     if (
         targets.renderObject != 0 &&
         !minecraft::ItemRenderer::
             renderObjectAttached()
     ) {
-        minecraft::ItemRenderer::
-            attachRenderObject(
-                targets.renderObject
+        if (
+            minecraft::ItemRenderer::
+                attachRenderObject(
+                    targets.renderObject
+                )
+        ) {
+            core::Logger::info(
+                "ModuleManager: "
+                "RenderObject attached"
             );
+        }
     }
 
     /*
-     * Camera infrastructure.
-     */
-    minecraft::Camera::attach(
-        targets.getPerspective,
-        targets.localPlayerApplyTurnDelta
-    );
-
-    /*
-     * ViewModel FOV.
+     * ViewModel item FOV.
      */
     g_viewModel.bindNativeTarget(
         targets.getFov
     );
 
     /*
-     * ItemPhysics world rendering boundaries.
+     * -------------------------------------------------
+     * Camera / Freelook
+     * -------------------------------------------------
+     *
+     * ScreenView::render belongs exclusively to Camera.
+     *
+     * ItemPhysics no longer hooks it.
      */
-    g_itemPhysics.bindNativeTargets(
-        targets.setupAndRender,
+    minecraft::Camera::attach(
+        targets.getPerspective,
+        targets.localPlayerApplyTurnDelta,
+        targets.clientInstanceUpdate,
+        targets.screenViewRender,
+        targets.clientInstanceGetLocalPlayer
+    );
+
+    /*
+     * -------------------------------------------------
+     * ItemPhysics
+     * -------------------------------------------------
+     */
+    g_itemPhysics.bindNativeTarget(
         targets.renderItemGroup
     );
 
     /*
-     * For the current supported build, all of these should
-     * be present before the integration is considered fully
-     * resolved.
+     * Full supported-build target state.
+     *
+     * GetFov is optional for basic ViewModel translation,
+     * but resolved on the supported build.
      */
     g_targetsResolved =
         targets.renderItem != 0 &&
         targets.renderObject != 0 &&
-        targets.getFov != 0 &&
+
         targets.getPerspective != 0 &&
         targets.localPlayerApplyTurnDelta != 0 &&
+        targets.clientInstanceUpdate != 0 &&
+        targets.clientInstanceGetLocalPlayer != 0 &&
+        targets.screenViewRender != 0 &&
+
         targets.renderItemGroup != 0;
+
+    if (g_targetsResolved) {
+        core::Logger::info(
+            "ModuleManager: "
+            "all required native targets resolved"
+        );
+    }
 
     return targets.any();
 }
@@ -142,6 +189,10 @@ bool ModuleManager::initialize()
         return true;
     }
 
+    core::Logger::info(
+        "ModuleManager initializing"
+    );
+
     bool success = true;
 
     for (
@@ -150,12 +201,18 @@ bool ModuleManager::initialize()
     ) {
         if (module == nullptr) {
             success = false;
+
             continue;
         }
 
         const bool result =
             module->initialize();
 
+        /*
+         * WaitingForRuntime/WaitingForTarget are normal
+         * startup states because preload-native can run
+         * before Minecraft has finished loading.
+         */
         if (
             !result &&
             module->status() !=
@@ -166,12 +223,27 @@ bool ModuleManager::initialize()
                     WaitingForTarget
         ) {
             success = false;
+
+            core::Logger::error(
+                "Module initialization failed: %s",
+                module->name()
+            );
         }
     }
 
+    /*
+     * First native-resolution attempt.
+     *
+     * tick() will retry if Minecraft is not ready yet.
+     */
     tryResolveMinecraft();
 
-    initialized_ = success;
+    initialized_ =
+        success;
+
+    core::Logger::info(
+        "ModuleManager initialized"
+    );
 
     return success;
 }
@@ -182,10 +254,21 @@ void ModuleManager::shutdown()
         return;
     }
 
+    core::Logger::info(
+        "ModuleManager shutting down"
+    );
+
+    /*
+     * Disable modules before removing native hooks.
+     */
     g_viewModel.disable();
     g_itemPhysics.disable();
     g_freelook.disable();
 
+    /*
+     * Give modules a chance to release their own hooks and
+     * callbacks first.
+     */
     for (
         Module* module :
         modules_
@@ -195,16 +278,26 @@ void ModuleManager::shutdown()
         }
     }
 
+    /*
+     * Shared rendering/camera hooks come last.
+     */
     minecraft::Camera::detach();
-    minecraft::ItemRenderer::detach();
 
-    g_targets = {};
+    minecraft::ItemRenderer::
+        detach();
+
+    g_targets =
+        {};
 
     g_targetsResolved =
         false;
 
     initialized_ =
         false;
+
+    core::Logger::info(
+        "ModuleManager shutdown complete"
+    );
 }
 
 void ModuleManager::tick(
@@ -214,6 +307,11 @@ void ModuleManager::tick(
         return;
     }
 
+    /*
+     * Retry resolution because preload-native can execute
+     * before libminecraftpe.so has a final executable
+     * mapping.
+     */
     if (!g_targetsResolved) {
         tryResolveMinecraft();
     }
@@ -233,7 +331,7 @@ void ModuleManager::tick(
 Module* ModuleManager::get(
     ModuleId id
 ) noexcept {
-    const auto index =
+    const std::size_t index =
         moduleIndex(id);
 
     if (
@@ -250,7 +348,7 @@ const Module*
 ModuleManager::get(
     ModuleId id
 ) const noexcept {
-    const auto index =
+    const std::size_t index =
         moduleIndex(id);
 
     if (
@@ -273,7 +371,22 @@ bool ModuleManager::enable(
         return false;
     }
 
-    return module->enable();
+    const bool result =
+        module->enable();
+
+    if (result) {
+        core::Logger::info(
+            "Module enabled: %s",
+            module->name()
+        );
+    } else {
+        core::Logger::warning(
+            "Module enable pending/failed: %s",
+            module->name()
+        );
+    }
+
+    return result;
 }
 
 void ModuleManager::disable(
@@ -282,9 +395,16 @@ void ModuleManager::disable(
     Module* module =
         get(id);
 
-    if (module != nullptr) {
-        module->disable();
+    if (module == nullptr) {
+        return;
     }
+
+    module->disable();
+
+    core::Logger::info(
+        "Module disabled: %s",
+        module->name()
+    );
 }
 
 bool ModuleManager::initialized()
