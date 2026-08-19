@@ -5,9 +5,9 @@
 namespace levi::minecraft {
 
 bool ItemRenderer::attach(
-    std::uintptr_t target
+    std::uintptr_t renderItemTarget
 ) noexcept {
-    if (target == 0) {
+    if (renderItemTarget == 0) {
         return false;
     }
 
@@ -15,17 +15,18 @@ bool ItemRenderer::attach(
         return true;
     }
 
-    hook_ =
+    renderItemHook_ =
         levi::memory::Hook(
-            target,
+            renderItemTarget,
             reinterpret_cast<void*>(
-                &ItemRenderer::renderItemDetour
+                &ItemRenderer::
+                    renderItemDetour
             )
         );
 
-    if (!hook_.install()) {
+    if (!renderItemHook_.install()) {
         core::Logger::error(
-            "ItemRenderer: failed to hook RenderItem"
+            "ItemRenderer: RenderItem hook failed"
         );
 
         return false;
@@ -40,24 +41,83 @@ bool ItemRenderer::attach(
     return true;
 }
 
-bool ItemRenderer::detach() noexcept {
-    if (!attached_) {
-        return true;
-    }
-
-    if (!hook_.remove()) {
+bool ItemRenderer::attachRenderObject(
+    std::uintptr_t renderObjectTarget
+) noexcept {
+    if (renderObjectTarget == 0) {
         return false;
     }
 
-    attached_ = false;
+    if (
+        renderObjectHook_.installed()
+    ) {
+        return true;
+    }
+
+    renderObjectHook_ =
+        levi::memory::Hook(
+            renderObjectTarget,
+            reinterpret_cast<void*>(
+                &ItemRenderer::
+                    renderObjectDetour
+            )
+        );
+
+    if (!renderObjectHook_.install()) {
+        core::Logger::error(
+            "ItemRenderer: RenderObject hook failed"
+        );
+
+        return false;
+    }
+
+    core::Logger::info(
+        "ItemRenderer: RenderObject hook active"
+    );
 
     return true;
 }
 
-bool ItemRenderer::attached() noexcept {
+bool ItemRenderer::detach() noexcept {
+    bool success = true;
+
+    /*
+     * Remove nested/special hook first.
+     */
+    if (
+        renderObjectHook_.installed() &&
+        !renderObjectHook_.remove()
+    ) {
+        success = false;
+    }
+
+    if (
+        renderItemHook_.installed() &&
+        !renderItemHook_.remove()
+    ) {
+        success = false;
+    }
+
+    attached_ = false;
+
+    worldItemDepth_ = 0;
+    worldItemKey_ = nullptr;
+    viewModelRenderDepth_ = 0;
+
+    return success;
+}
+
+bool ItemRenderer::attached()
+    noexcept {
     return
         attached_ &&
-        hook_.installed();
+        renderItemHook_.installed();
+}
+
+bool ItemRenderer::renderObjectAttached()
+    noexcept {
+    return
+        renderObjectHook_.installed();
 }
 
 void ItemRenderer::setViewModelEnabled(
@@ -67,39 +127,48 @@ void ItemRenderer::setViewModelEnabled(
 }
 
 void ItemRenderer::setViewModelTransform(
-    const levi::math::Transform& transform
+    const levi::math::Transform&
+        transform
 ) noexcept {
-    viewModelTransform_ = transform;
+    viewModelTransform_ =
+        transform;
 }
 
 void ItemRenderer::setViewModelPerspective(
     bool thirdPerson,
     bool applyThirdPerson
 ) noexcept {
-    thirdPerson_ = thirdPerson;
-    applyThirdPerson_ = applyThirdPerson;
+    thirdPerson_ =
+        thirdPerson;
+
+    applyThirdPerson_ =
+        applyThirdPerson;
 }
 
 void ItemRenderer::setWorldTransformCallback(
     WorldTransformCallback callback
 ) noexcept {
-    worldTransformCallback_ = callback;
+    worldTransformCallback_ =
+        callback;
 }
 
 void ItemRenderer::beginWorldItemRender(
     void* worldItemKey
 ) noexcept {
     if (worldItemDepth_ == 0) {
-        worldItemKey_ = worldItemKey;
+        worldItemKey_ =
+            worldItemKey;
     }
 
     ++worldItemDepth_;
 }
 
-void ItemRenderer::endWorldItemRender() noexcept {
+void ItemRenderer::endWorldItemRender()
+    noexcept {
     if (worldItemDepth_ <= 0) {
         worldItemDepth_ = 0;
         worldItemKey_ = nullptr;
+
         return;
     }
 
@@ -110,7 +179,8 @@ void ItemRenderer::endWorldItemRender() noexcept {
     }
 }
 
-bool ItemRenderer::inWorldItemRender() noexcept {
+bool ItemRenderer::inWorldItemRender()
+    noexcept {
     return worldItemDepth_ > 0;
 }
 
@@ -125,8 +195,10 @@ void ItemRenderer::renderItemDetour(
     int renderingMainHand
 ) noexcept {
     const auto original =
-        reinterpret_cast<RenderItemFn>(
-            hook_.original()
+        reinterpret_cast<
+            RenderItemFn
+        >(
+            renderItemHook_.original()
         );
 
     if (original == nullptr) {
@@ -134,30 +206,38 @@ void ItemRenderer::renderItemDetour(
     }
 
     auto matrixStack =
-        MatrixStack::fromRenderContext(
-            renderContext
-        );
+        MatrixStack::
+            fromRenderContext(
+                renderContext
+            );
 
     /*
-     * Dropped-world-item scope takes priority.
+     * ItemPhysics/world-item scope always wins over
+     * ViewModel.
      *
-     * RE showed world items can reach RenderItem with
-     * renderingMainHand == 1 too.
+     * RE proved dropped items can also arrive here with
+     * renderingMainHand == 1.
      */
     if (
         inWorldItemRender() &&
-        worldTransformCallback_ != nullptr &&
-        matrixStack.current() != nullptr
+        worldTransformCallback_ !=
+            nullptr &&
+        matrixStack.current() !=
+            nullptr
     ) {
         Matrix4 snapshot{};
 
         const bool haveSnapshot =
-            matrixStack.snapshot(snapshot);
+            matrixStack.snapshot(
+                snapshot
+            );
 
         worldTransformCallback_(
             worldItemKey_,
             matrixStack
         );
+
+        matrixStack.markDirty();
 
         original(
             self,
@@ -171,7 +251,9 @@ void ItemRenderer::renderItemDetour(
         );
 
         if (haveSnapshot) {
-            matrixStack.restore(snapshot);
+            matrixStack.restore(
+                snapshot
+            );
         }
 
         return;
@@ -180,20 +262,37 @@ void ItemRenderer::renderItemDetour(
     const bool allowViewModel =
         viewModelEnabled_ &&
         renderingMainHand != 0 &&
-        (!thirdPerson_ || applyThirdPerson_);
+        (
+            !thirdPerson_ ||
+            applyThirdPerson_
+        );
 
     if (
         allowViewModel &&
-        matrixStack.current() != nullptr
+        matrixStack.current() !=
+            nullptr
     ) {
         Matrix4 snapshot{};
 
         const bool haveSnapshot =
-            matrixStack.snapshot(snapshot);
+            matrixStack.snapshot(
+                snapshot
+            );
 
+        /*
+         * Apply ONCE.
+         */
         matrixStack.apply(
             viewModelTransform_
         );
+
+        matrixStack.markDirty();
+
+        /*
+         * Any nested renderObject call now knows that it
+         * belongs to this ViewModel render invocation.
+         */
+        ++viewModelRenderDepth_;
 
         original(
             self,
@@ -206,8 +305,12 @@ void ItemRenderer::renderItemDetour(
             renderingMainHand
         );
 
+        --viewModelRenderDepth_;
+
         if (haveSnapshot) {
-            matrixStack.restore(snapshot);
+            matrixStack.restore(
+                snapshot
+            );
         }
 
         return;
@@ -223,6 +326,74 @@ void ItemRenderer::renderItemDetour(
         useMatrixAsIs,
         renderingMainHand
     );
+}
+
+void* ItemRenderer::renderObjectDetour(
+    void* self,
+    void* renderContext,
+    void* object,
+    void* itemOrModel,
+    int flags
+) noexcept {
+    const auto original =
+        reinterpret_cast<
+            RenderObjectFn
+        >(
+            renderObjectHook_.original()
+        );
+
+    if (original == nullptr) {
+        return nullptr;
+    }
+
+    /*
+     * Do NOT apply the ViewModel transform again.
+     *
+     * Atlas doesn't do that either.
+     *
+     * This detour exists to make the special object path
+     * notice that the matrix was modified by the parent
+     * RenderItem call.
+     */
+    const bool inViewModelObjectPath =
+        viewModelEnabled_ &&
+        viewModelRenderDepth_ > 0 &&
+        !inWorldItemRender();
+
+    if (!inViewModelObjectPath) {
+        return original(
+            self,
+            renderContext,
+            object,
+            itemOrModel,
+            flags
+        );
+    }
+
+    auto matrixStack =
+        MatrixStack::
+            fromRenderContext(
+                renderContext
+            );
+
+    /*
+     * Atlas's renderObject detour writes the dirty state
+     * both before and after original execution.
+     */
+    matrixStack.markDirty();
+
+    void* result =
+        original(
+            self,
+            renderContext,
+            object,
+            itemOrModel,
+            flags
+        );
+
+    matrixStack.markDirty();
+
+    return result;
 }
 
 } // namespace levi::minecraft
