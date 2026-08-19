@@ -12,6 +12,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(LEVI_TARGET minecraft)
 
 add_library(${LEVI_TARGET} SHARED
+    src/main.cpp
+
     src/core/Logger.cpp
     src/core/State.cpp
     src/core/Runtime.cpp
