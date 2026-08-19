@@ -46,6 +46,14 @@ public:
         const levi::math::Transform& transform
     ) const noexcept;
 
+    /*
+     * Critical for special ItemInHandObject rendering.
+     *
+     * Atlas sets MatrixStack +0x88 to 1 in its
+     * renderObject detour.
+     */
+    void markDirty() const noexcept;
+
 private:
     std::uintptr_t address_{0};
 };
