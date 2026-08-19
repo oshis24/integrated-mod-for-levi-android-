@@ -3,6 +3,7 @@
 #include "levi/core/Logger.hpp"
 #include "levi/core/Runtime.hpp"
 #include "levi/core/State.hpp"
+
 #include "levi/minecraft/ItemRenderer.hpp"
 
 #include <cmath>
@@ -78,11 +79,27 @@ bool ItemPhysics::initialize() noexcept {
         status_ =
             ModuleStatus::Failed;
 
+        levi::core::Logger::error(
+            "ItemPhysics: unsupported Minecraft version"
+        );
+
         return false;
     }
 
     active_ = this;
 
+    enabled_ = false;
+
+    orientationCache_ = {};
+
+    frameCounter_ = 0;
+
+    /*
+     * RenderItem owns the actual MatrixStack mutation.
+     *
+     * ItemPhysics only marks the world-item scope through
+     * renderItemGroup.
+     */
     levi::minecraft::ItemRenderer::
         setWorldTransformCallback(
             &ItemPhysics::
@@ -92,64 +109,17 @@ bool ItemPhysics::initialize() noexcept {
     status_ =
         ModuleStatus::WaitingForTarget;
 
+    levi::core::Logger::info(
+        "ItemPhysics initialized"
+    );
+
     return true;
-}
-
-void ItemPhysics::bindNativeTargets(
-    std::uintptr_t setupAndRender,
-    std::uintptr_t renderItemGroup
-) noexcept {
-    if (
-        setupAndRender != 0 &&
-        !setupHook_.installed()
-    ) {
-        setupHook_ =
-            levi::memory::Hook(
-                setupAndRender,
-                reinterpret_cast<void*>(
-                    &ItemPhysics::
-                        setupAndRenderDetour
-                )
-            );
-
-        if (!setupHook_.install()) {
-            levi::core::Logger::warning(
-                "ItemPhysics: setupAndRender hook failed"
-            );
-        }
-    }
-
-    if (
-        renderItemGroup != 0 &&
-        !groupHook_.installed()
-    ) {
-        groupHook_ =
-            levi::memory::Hook(
-                renderItemGroup,
-                reinterpret_cast<void*>(
-                    &ItemPhysics::
-                        renderItemGroupDetour
-                )
-            );
-
-        if (!groupHook_.install()) {
-            levi::core::Logger::error(
-                "ItemPhysics: renderItemGroup hook failed"
-            );
-        }
-    }
-
-    if (groupHook_.installed()) {
-        status_ =
-            ModuleStatus::Ready;
-    }
 }
 
 void ItemPhysics::shutdown() noexcept {
     disable();
 
     groupHook_.remove();
-    setupHook_.remove();
 
     levi::minecraft::ItemRenderer::
         setWorldTransformCallback(
@@ -157,6 +127,7 @@ void ItemPhysics::shutdown() noexcept {
         );
 
     orientationCache_ = {};
+
     frameCounter_ = 0;
 
     if (active_ == this) {
@@ -165,12 +136,26 @@ void ItemPhysics::shutdown() noexcept {
 
     status_ =
         ModuleStatus::Disabled;
+
+    levi::core::Logger::info(
+        "ItemPhysics shutdown"
+    );
 }
 
 void ItemPhysics::tick(
     float deltaTime
 ) noexcept {
     (void)deltaTime;
+
+    if (!enabled_) {
+        return;
+    }
+
+    /*
+     * ItemPhysics is intentionally render-driven.
+     *
+     * No MatrixStack mutation happens in tick().
+     */
 }
 
 bool ItemPhysics::enable() noexcept {
@@ -178,16 +163,26 @@ bool ItemPhysics::enable() noexcept {
         status_ =
             ModuleStatus::WaitingForTarget;
 
+        levi::core::Logger::warning(
+            "ItemPhysics: renderItemGroup hook unavailable"
+        );
+
         return false;
     }
 
     enabled_ = true;
 
     levi::core::State::instance()
-        .setItemPhysicsEnabled(true);
+        .setItemPhysicsEnabled(
+            true
+        );
 
     status_ =
         ModuleStatus::Active;
+
+    levi::core::Logger::info(
+        "ItemPhysics enabled"
+    );
 
     return true;
 }
@@ -196,10 +191,13 @@ void ItemPhysics::disable() noexcept {
     enabled_ = false;
 
     levi::core::State::instance()
-        .setItemPhysicsEnabled(false);
+        .setItemPhysicsEnabled(
+            false
+        );
 
     if (
-        status_ == ModuleStatus::Active
+        status_ ==
+        ModuleStatus::Active
     ) {
         status_ =
             groupHook_.installed()
@@ -207,55 +205,64 @@ void ItemPhysics::disable() noexcept {
                 : ModuleStatus::
                     WaitingForTarget;
     }
+
+    levi::core::Logger::info(
+        "ItemPhysics disabled"
+    );
 }
 
-bool ItemPhysics::enabled() const noexcept {
+bool ItemPhysics::enabled()
+    const noexcept {
     return enabled_;
 }
 
 ModuleStatus
-ItemPhysics::status() const noexcept {
+ItemPhysics::status()
+    const noexcept {
     return status_;
 }
 
-bool ItemPhysics::hooksInstalled()
-    const noexcept {
-    return groupHook_.installed();
+void ItemPhysics::bindNativeTarget(
+    std::uintptr_t renderItemGroup
+) noexcept {
+    if (
+        renderItemGroup == 0 ||
+        groupHook_.installed()
+    ) {
+        return;
+    }
+
+    groupHook_ =
+        levi::memory::Hook(
+            renderItemGroup,
+            reinterpret_cast<void*>(
+                &ItemPhysics::
+                    renderItemGroupDetour
+            )
+        );
+
+    if (!groupHook_.install()) {
+        levi::core::Logger::error(
+            "ItemPhysics: failed to hook renderItemGroup"
+        );
+
+        status_ =
+            ModuleStatus::WaitingForTarget;
+
+        return;
+    }
+
+    status_ =
+        ModuleStatus::Ready;
+
+    levi::core::Logger::info(
+        "ItemPhysics: renderItemGroup hook active"
+    );
 }
 
-void ItemPhysics::setupAndRenderDetour(
-    void* self,
-    void* context
-) noexcept {
-    auto* module = active_;
-
-    const auto original =
-        module != nullptr
-            ? reinterpret_cast<
-                SetupAndRenderFn
-            >(
-                module->
-                    setupHook_.original()
-            )
-            : nullptr;
-
-    if (module != nullptr) {
-        ++module->frameCounter_;
-
-        if (
-            (module->frameCounter_ &
-             0x7F) == 0
-        ) {
-            module->expireOldEntries();
-        }
-    }
-
-    if (original != nullptr) {
-        original(
-            self,
-            context
-        );
-    }
+bool ItemPhysics::hookInstalled()
+    const noexcept {
+    return groupHook_.installed();
 }
 
 void ItemPhysics::renderItemGroupDetour(
@@ -267,7 +274,8 @@ void ItemPhysics::renderItemGroupDetour(
     float value0,
     float value1
 ) noexcept {
-    auto* module = active_;
+    auto* module =
+        active_;
 
     const auto original =
         module != nullptr
@@ -283,13 +291,33 @@ void ItemPhysics::renderItemGroupDetour(
         return;
     }
 
-    if (
-        module != nullptr &&
-        !module->setupHook_.installed()
-    ) {
+    if (module != nullptr) {
         ++module->frameCounter_;
+
+        /*
+         * Periodically expire world-item orientation
+         * entries to avoid pointer reuse creating stale
+         * transforms.
+         */
+        if (
+            (
+                module->frameCounter_ &
+                0x7F
+            ) == 0
+        ) {
+            module->expireOldEntries();
+        }
     }
 
+    /*
+     * Critical:
+     *
+     * World items can enter RenderItem with the same
+     * renderingMainHand flag as first-person items.
+     *
+     * This thread-local scope prevents ViewModel from
+     * touching dropped items.
+     */
     levi::minecraft::ItemRenderer::
         beginWorldItemRender(
             worldItem
@@ -314,7 +342,8 @@ void ItemPhysics::worldTransformCallback(
     levi::minecraft::MatrixStack&
         matrixStack
 ) noexcept {
-    auto* module = active_;
+    auto* module =
+        active_;
 
     if (
         module == nullptr ||
@@ -354,6 +383,10 @@ void ItemPhysics::applyStableOrientation(
         return;
     }
 
+    /*
+     * Keep current model scale while replacing only the
+     * continuously changing rotational basis.
+     */
     const float scaleX =
         length3(
             matrix->m[0],
@@ -383,37 +416,52 @@ void ItemPhysics::applyStableOrientation(
         return;
     }
 
+    /*
+     * First time this world entity is seen:
+     *
+     * capture its own model basis.
+     *
+     * This is the important difference from the buggy
+     * reference mod: no universal 90-degree correction is
+     * applied.
+     *
+     * Sword, block, shield, banner, etc. preserve their
+     * original model orientation.
+     */
     if (!entry->valid) {
-        bool ok = true;
+        bool valid = true;
 
-        ok &= normalize3(
-            matrix->m[0],
-            matrix->m[1],
-            matrix->m[2],
-            entry->basis[0],
-            entry->basis[1],
-            entry->basis[2]
-        );
+        valid &=
+            normalize3(
+                matrix->m[0],
+                matrix->m[1],
+                matrix->m[2],
+                entry->basis[0],
+                entry->basis[1],
+                entry->basis[2]
+            );
 
-        ok &= normalize3(
-            matrix->m[4],
-            matrix->m[5],
-            matrix->m[6],
-            entry->basis[3],
-            entry->basis[4],
-            entry->basis[5]
-        );
+        valid &=
+            normalize3(
+                matrix->m[4],
+                matrix->m[5],
+                matrix->m[6],
+                entry->basis[3],
+                entry->basis[4],
+                entry->basis[5]
+            );
 
-        ok &= normalize3(
-            matrix->m[8],
-            matrix->m[9],
-            matrix->m[10],
-            entry->basis[6],
-            entry->basis[7],
-            entry->basis[8]
-        );
+        valid &=
+            normalize3(
+                matrix->m[8],
+                matrix->m[9],
+                matrix->m[10],
+                entry->basis[6],
+                entry->basis[7],
+                entry->basis[8]
+            );
 
-        if (!ok) {
+        if (!valid) {
             return;
         }
 
@@ -421,31 +469,47 @@ void ItemPhysics::applyStableOrientation(
     }
 
     /*
-     * Freeze orientation, but preserve the model's own
-     * initial basis and current scale.
-     *
-     * No universal 90-degree correction.
+     * Replace vanilla time-dependent orientation with the
+     * stable captured basis while preserving current scale.
      */
+
     matrix->m[0] =
-        entry->basis[0] * scaleX;
+        entry->basis[0] *
+        scaleX;
+
     matrix->m[1] =
-        entry->basis[1] * scaleX;
+        entry->basis[1] *
+        scaleX;
+
     matrix->m[2] =
-        entry->basis[2] * scaleX;
+        entry->basis[2] *
+        scaleX;
 
     matrix->m[4] =
-        entry->basis[3] * scaleY;
+        entry->basis[3] *
+        scaleY;
+
     matrix->m[5] =
-        entry->basis[4] * scaleY;
+        entry->basis[4] *
+        scaleY;
+
     matrix->m[6] =
-        entry->basis[5] * scaleY;
+        entry->basis[5] *
+        scaleY;
 
     matrix->m[8] =
-        entry->basis[6] * scaleZ;
+        entry->basis[6] *
+        scaleZ;
+
     matrix->m[9] =
-        entry->basis[7] * scaleZ;
+        entry->basis[7] *
+        scaleZ;
+
     matrix->m[10] =
-        entry->basis[8] * scaleZ;
+        entry->basis[8] *
+        scaleZ;
+
+    matrixStack.markDirty();
 
     entry->age =
         frameCounter_;
@@ -458,10 +522,13 @@ ItemPhysics::findOrCreateEntry(
     OrientationEntry* freeEntry =
         nullptr;
 
-    OrientationEntry* oldest =
+    OrientationEntry* oldestEntry =
         nullptr;
 
-    for (auto& entry : orientationCache_) {
+    for (
+        auto& entry :
+        orientationCache_
+    ) {
         if (
             entry.valid &&
             entry.key == key
@@ -476,47 +543,58 @@ ItemPhysics::findOrCreateEntry(
             !entry.valid &&
             freeEntry == nullptr
         ) {
-            freeEntry = &entry;
+            freeEntry =
+                &entry;
         }
 
         if (
-            oldest == nullptr ||
-            entry.age < oldest->age
+            oldestEntry == nullptr ||
+            entry.age <
+                oldestEntry->age
         ) {
-            oldest = &entry;
+            oldestEntry =
+                &entry;
         }
     }
 
-    OrientationEntry* entry =
+    OrientationEntry* target =
         freeEntry != nullptr
             ? freeEntry
-            : oldest;
+            : oldestEntry;
 
-    if (entry == nullptr) {
+    if (target == nullptr) {
         return nullptr;
     }
 
-    *entry = {};
+    *target = {};
 
-    entry->key = key;
-    entry->age = frameCounter_;
+    target->key = key;
 
-    return entry;
+    target->age =
+        frameCounter_;
+
+    return target;
 }
 
-void ItemPhysics::expireOldEntries() noexcept {
+void ItemPhysics::expireOldEntries()
+    noexcept {
     constexpr std::uint64_t
-        kMaxAge = 600;
+        kMaximumAge = 600;
 
-    for (auto& entry : orientationCache_) {
+    for (
+        auto& entry :
+        orientationCache_
+    ) {
         if (!entry.valid) {
             continue;
         }
 
         if (
-            frameCounter_ > entry.age &&
-            frameCounter_ - entry.age >
-                kMaxAge
+            frameCounter_ >
+                entry.age &&
+            frameCounter_ -
+                entry.age >
+                kMaximumAge
         ) {
             entry = {};
         }
