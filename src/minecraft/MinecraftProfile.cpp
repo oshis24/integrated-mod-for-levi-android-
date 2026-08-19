@@ -3,88 +3,64 @@
 #include "levi/core/Logger.hpp"
 #include "levi/core/Runtime.hpp"
 #include "levi/memory/Pattern.hpp"
-#include "levi/minecraft/ItemRenderer.hpp"
 
 namespace levi::minecraft {
 
 namespace {
 
 /*
- * Reference:
+ * BedrockTools signatures for Minecraft 1.26.44.3
+ * reference layer.
  *
- * libItemPhysic.so
- *   └── SV::setupAndRender
- *
- * 48-byte ARM64 signature reconstructed from the
- * pair-encoded signature stored in the reference binary.
+ * These are function-start signatures, not hardcoded RVA.
  */
-constexpr std::uint8_t kSetupAndRender[] = {
-    0xec, 0x0f, 0x17, 0xfc,
-    0xeb, 0x2b, 0x01, 0x6d,
-    0xe9, 0x23, 0x02, 0x6d,
-    0xfd, 0x7b, 0x03, 0xa9,
-    0xfc, 0x6f, 0x04, 0xa9,
-    0xfa, 0x67, 0x05, 0xa9,
-    0xf8, 0x5f, 0x06, 0xa9,
-    0xf6, 0x57, 0x07, 0xa9,
-    0xf4, 0x4f, 0x08, 0xa9,
-    0xfd, 0xc3, 0x00, 0x91,
-    0xff, 0x03, 0x09, 0xd1,
-    0xd5, 0xfc, 0x03, 0x00
-};
 
-constexpr std::uint8_t kRenderItemGroup[] = {
-    0xff, 0xc3, 0x02, 0xd1,
-    0xec, 0x13, 0x00, 0xfd,
-    0xeb, 0x2b, 0x03, 0x6d,
-    0xe9, 0x23, 0x04, 0x6d,
-    0xfd, 0x7b, 0x05, 0xa9,
-    0xfc, 0x6f, 0x06, 0xa9,
-    0xfa, 0x67, 0x07, 0xa9,
-    0xf8, 0x5f, 0x08, 0xa9,
-    0xf6, 0x57, 0x09, 0xa9,
-    0xf4, 0x4f, 0x0a, 0xa9,
-    0xfd, 0x43, 0x01, 0x91,
-    0xf4, 0x03, 0x02, 0xaa
-};
+constexpr const char* kRenderItemPattern =
+    "? ? ? FC "
+    "? ? ? 6D "
+    "? ? ? 6D "
+    "? ? ? 6D "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? A9 "
+    "? ? ? 91 "
+    "? ? ? D1 "
+    "58 D0 3B D5 "
+    "? ? ? F9";
+
+constexpr const char* kGetFovPattern =
+    "? ? ? FC "
+    "? ? ? 6D "
+    "? ? ? A9 "
+    "? ? ? F9 "
+    "? ? ? A9 "
+    "? ? ? 91 "
+    "08 40 20 1E";
+
+constexpr const char* kGetPerspectivePattern =
+    "? ? ? A9 "
+    "FD 03 00 91 "
+    "? ? ? F9 "
+    "? ? ? F9 "
+    "? ? ? F9 "
+    "00 01 3F D6 "
+    "? ? ? F9 "
+    "? ? ? F9 "
+    "? ? ? A8 "
+    "20 00 1F D6 "
+    "? ? ? A9 "
+    "FD 03 00 91";
 
 /*
- * This is the call-site signature used by the reference
- * before decoding its BL instruction.
+ * This intentionally remains unresolved until we have an
+ * exact 1.26.44.3 renderObject pattern.
+ *
+ * Atlas proves the renderObject conceptual boundary exists,
+ * but the repo should not hook a guessed function.
  */
-constexpr std::uint8_t kItemInHandCallsite[] = {
-    0x27, 0x00, 0x80, 0x52,
-    0xe0, 0x03, 0x15, 0xaa
-};
-
-memory::Pattern makeExactPattern(
-    const std::uint8_t* bytes,
-    std::size_t size
-) noexcept {
-    static constexpr std::uint8_t exact[64] = {
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff,
-        0xff,0xff,0xff,0xff
-    };
-
-    return memory::Pattern(
-        bytes,
-        exact,
-        size
-    );
-}
 
 } // namespace
 
@@ -97,123 +73,50 @@ bool MinecraftProfile::supported() noexcept {
 bool MinecraftProfile::libraryLoaded() noexcept {
     memory::MemoryRange text;
 
-    return memory::PatternScanner::
-        findTextRange(
-            kLibrary,
-            text
-        );
+    return
+        memory::PatternScanner::
+            findTextRange(
+                kLibrary,
+                text
+            );
 }
 
 std::uintptr_t
-MinecraftProfile::resolveSetupAndRender(
+MinecraftProfile::resolveRenderItem(
     const memory::MemoryRange& text
 ) noexcept {
-    const auto pattern =
-        makeExactPattern(
-            kSetupAndRender,
-            sizeof(kSetupAndRender)
-        );
-
-    return memory::PatternScanner::find(
-        text,
-        pattern
-    );
-}
-
-std::uintptr_t
-MinecraftProfile::resolveRenderItemGroup(
-    const memory::MemoryRange& text
-) noexcept {
-    const auto pattern =
-        makeExactPattern(
-            kRenderItemGroup,
-            sizeof(kRenderItemGroup)
-        );
-
-    return memory::PatternScanner::find(
-        text,
-        pattern
-    );
-}
-
-std::uintptr_t
-MinecraftProfile::resolveItemInHandRenderer(
-    const memory::MemoryRange& text
-) noexcept {
-    const auto pattern =
-        makeExactPattern(
-            kItemInHandCallsite,
-            sizeof(kItemInHandCallsite)
-        );
-
-    const auto callsite =
+    return
         memory::PatternScanner::find(
             text,
-            pattern
+            memory::Pattern(
+                kRenderItemPattern
+            )
         );
+}
 
-    if (callsite == 0) {
-        return 0;
-    }
-
-    /*
-     * Reference implementation:
-     *
-     *     LDR W3, [X0,#4]!
-     *
-     * then verifies:
-     *
-     *     bits[31:26] == 0x25
-     *
-     * which is AArch64 BL.
-     */
-    const auto* instruction =
-        reinterpret_cast<
-            const std::uint32_t*
-        >(callsite + 4);
-
-    const std::uint32_t bl =
-        *instruction;
-
-    if (
-        ((bl >> 26) & 0x3f) != 0x25
-    ) {
-        core::Logger::warning(
-            "ItemInHandRenderer callsite found, "
-            "but following instruction is not BL"
-        );
-
-        return 0;
-    }
-
-    /*
-     * BL immediate:
-     *
-     * imm26 << 2
-     * sign-extended to 64 bit
-     */
-    const std::int64_t imm26 =
-        static_cast<std::int64_t>(
-            bl & 0x03ffffffu
-        );
-
-    std::int64_t offset =
-        imm26 << 2;
-
-    if (
-        (imm26 & (1LL << 25)) != 0
-    ) {
-        offset |=
-            static_cast<std::int64_t>(
-                0xfffffffff0000000ULL
-            );
-    }
-
+std::uintptr_t
+MinecraftProfile::resolveGetFov(
+    const memory::MemoryRange& text
+) noexcept {
     return
-        static_cast<std::uintptr_t>(
-            static_cast<
-                std::int64_t
-            >(callsite + 4) + offset
+        memory::PatternScanner::find(
+            text,
+            memory::Pattern(
+                kGetFovPattern
+            )
+        );
+}
+
+std::uintptr_t
+MinecraftProfile::resolveGetPerspective(
+    const memory::MemoryRange& text
+) noexcept {
+    return
+        memory::PatternScanner::find(
+            text,
+            memory::Pattern(
+                kGetPerspectivePattern
+            )
         );
 }
 
@@ -235,57 +138,54 @@ bool MinecraftProfile::resolve(
                 text
             )
     ) {
+        core::Logger::warning(
+            "MinecraftProfile: "
+            "libminecraftpe.so not loaded"
+        );
+
         return false;
     }
 
-    targets.setupAndRender =
-        resolveSetupAndRender(text);
+    targets.renderItem =
+        resolveRenderItem(text);
 
-    targets.renderItemGroup =
-        resolveRenderItemGroup(text);
+    targets.getFov =
+        resolveGetFov(text);
 
-    targets.itemInHandRenderer =
-        resolveItemInHandRenderer(text);
-
-    if (
-    targets.itemInHandRenderer != 0
-) {
-    core::Logger::info(
-        "MinecraftProfile: ItemInHandRenderer "
-        "target confirmed at %p",
-        reinterpret_cast<void*>(
-            targets.itemInHandRenderer
-        )
-    );
-    }
+    targets.getPerspective =
+        resolveGetPerspective(text);
 
     core::Logger::info(
-        "MinecraftProfile %s",
+        "MinecraftProfile %s:",
         kVersion
     );
 
     core::Logger::info(
-        "setupAndRender = %p",
+        "  RenderItem       = %p",
         reinterpret_cast<void*>(
-            targets.setupAndRender
+            targets.renderItem
         )
     );
 
     core::Logger::info(
-        "renderItemGroup = %p",
+        "  GetFov           = %p",
         reinterpret_cast<void*>(
-            targets.renderItemGroup
+            targets.getFov
         )
     );
 
     core::Logger::info(
-        "ItemInHandRenderer = %p",
+        "  GetPerspective   = %p",
         reinterpret_cast<void*>(
-            targets.itemInHandRenderer
+            targets.getPerspective
         )
     );
 
-    return targets.anyRenderTarget();
+    /*
+     * Do not report renderObject/setupAndRender as valid
+     * until their exact native signatures are incorporated.
+     */
+    return targets.any();
 }
 
 } // namespace levi::minecraft
