@@ -2,14 +2,19 @@
 
 #include "levi/core/Logger.hpp"
 #include "levi/core/Runtime.hpp"
+
 #include "levi/memory/Pattern.hpp"
+#include "levi/memory/PatternScanner.hpp"
 
 namespace levi::minecraft {
 
 namespace {
 
 /*
- * BedrockTools verified signatures.
+ * RenderItem
+ *
+ * Verified from BedrockTools and current
+ * Minecraft 1.26.44.3.
  */
 constexpr const char* kRenderItemPattern =
     "? ? ? FC "
@@ -27,6 +32,42 @@ constexpr const char* kRenderItemPattern =
     "58 D0 3B D5 "
     "? ? ? F9";
 
+/*
+ * Atlas-equivalent renderObject.
+ *
+ * Current Minecraft 1.26.44.3:
+ *
+ *      0xADDFE80
+ *
+ * The full 40-byte prefix was checked against .text and
+ * occurs exactly once.
+ *
+ * ARM64 ABI:
+ *
+ * x0 = renderer/self
+ * x1 = RenderContext
+ * x2 = render object
+ * x3 = item/model information
+ * w4 = render flag
+ *
+ * Return value:
+ * x0 = pointer-like result
+ */
+constexpr const char* kRenderObjectPattern =
+    "FD 7B BA A9 "
+    "FC 6F 01 A9 "
+    "FA 67 02 A9 "
+    "F8 5F 03 A9 "
+    "F6 57 04 A9 "
+    "F4 4F 05 A9 "
+    "FD 03 00 91 "
+    "FF 43 0E D1 "
+    "5B D0 3B D5 "
+    "F8 03 02 AA";
+
+/*
+ * ViewModel item FOV.
+ */
 constexpr const char* kGetFovPattern =
     "? ? ? FC "
     "? ? ? 6D "
@@ -36,6 +77,11 @@ constexpr const char* kGetFovPattern =
     "? ? ? 91 "
     "08 40 20 1E";
 
+/*
+ * VanillaCameraAPI::GetPerspective
+ *
+ * Also confirmed by vtable +0x38 / index 7.
+ */
 constexpr const char* kGetPerspectivePattern =
     "? ? ? A9 "
     "FD 03 00 91 "
@@ -50,6 +96,11 @@ constexpr const char* kGetPerspectivePattern =
     "? ? ? A9 "
     "FD 03 00 91";
 
+/*
+ * LocalPlayer::applyTurnDelta
+ *
+ * Used by the Freelook input/body-rotation split.
+ */
 constexpr const char* kApplyTurnDeltaPattern =
     "? ? ? D1 "
     "? ? ? FD "
@@ -67,8 +118,7 @@ constexpr const char* kApplyTurnDeltaPattern =
     "? ? ? F9";
 
 /*
- * Reconstructed directly from the working
- * ItemPhysic Levi module.
+ * Reconstructed from the working ItemPhysic Levi module.
  */
 constexpr const char* kSetupAndRenderPattern =
     "EC 0F 17 FC "
@@ -85,6 +135,9 @@ constexpr const char* kSetupAndRenderPattern =
     "?? ?? ?? D5 "
     "FC 03 00 AA";
 
+/*
+ * Working ItemPhysic renderItemGroup boundary.
+ */
 constexpr const char* kRenderItemGroupPattern =
     "FF C3 02 D1 "
     "EC 13 00 FD "
@@ -107,9 +160,17 @@ std::uintptr_t scan(
         return 0;
     }
 
+    const memory::Pattern parsed(
+        pattern
+    );
+
+    if (!parsed.valid()) {
+        return 0;
+    }
+
     return memory::PatternScanner::find(
         text,
-        memory::Pattern(pattern)
+        parsed
     );
 }
 
@@ -122,7 +183,7 @@ bool MinecraftProfile::supported() noexcept {
 }
 
 bool MinecraftProfile::libraryLoaded() noexcept {
-    memory::MemoryRange text;
+    memory::MemoryRange text{};
 
     return
         memory::PatternScanner::
@@ -139,6 +200,16 @@ MinecraftProfile::resolveRenderItem(
     return scan(
         text,
         kRenderItemPattern
+    );
+}
+
+std::uintptr_t
+MinecraftProfile::resolveRenderObject(
+    const memory::MemoryRange& text
+) noexcept {
+    return scan(
+        text,
+        kRenderObjectPattern
     );
 }
 
@@ -201,7 +272,7 @@ bool MinecraftProfile::resolve(
         return false;
     }
 
-    memory::MemoryRange text;
+    memory::MemoryRange text{};
 
     if (
         !memory::PatternScanner::
@@ -214,13 +285,24 @@ bool MinecraftProfile::resolve(
     }
 
     targets.renderItem =
-        resolveRenderItem(text);
+        resolveRenderItem(
+            text
+        );
+
+    targets.renderObject =
+        resolveRenderObject(
+            text
+        );
 
     targets.getFov =
-        resolveGetFov(text);
+        resolveGetFov(
+            text
+        );
 
     targets.getPerspective =
-        resolveGetPerspective(text);
+        resolveGetPerspective(
+            text
+        );
 
     targets.localPlayerApplyTurnDelta =
         resolveLocalPlayerApplyTurnDelta(
@@ -228,10 +310,14 @@ bool MinecraftProfile::resolve(
         );
 
     targets.setupAndRender =
-        resolveSetupAndRender(text);
+        resolveSetupAndRender(
+            text
+        );
 
     targets.renderItemGroup =
-        resolveRenderItemGroup(text);
+        resolveRenderItemGroup(
+            text
+        );
 
     core::Logger::info(
         "MinecraftProfile %s resolved",
@@ -242,6 +328,13 @@ bool MinecraftProfile::resolve(
         "  RenderItem                = %p",
         reinterpret_cast<void*>(
             targets.renderItem
+        )
+    );
+
+    core::Logger::info(
+        "  RenderObject              = %p",
+        reinterpret_cast<void*>(
+            targets.renderObject
         )
     );
 
