@@ -1,145 +1,393 @@
 #include "levi/minecraft/MatrixStack.hpp"
 
-#include "levi/core/Logger.hpp"
+#include <cmath>
+#include <cstring>
 
 namespace levi::minecraft {
 
-void MatrixStack::bind(
-    PushFn push,
-    PopFn pop,
-    TranslateFn translate,
-    RotateFn rotate,
-    ScaleFn scale
+namespace {
+
+constexpr std::uintptr_t kRenderContextMatrixStackWrapper = 0x28;
+constexpr std::uintptr_t kWrapperMatrixStack = 0x18;
+
+constexpr std::uintptr_t kBlocksOffset = 0x50;
+constexpr std::uintptr_t kStartOffset = 0x68;
+constexpr std::uintptr_t kSizeOffset = 0x70;
+
+constexpr std::size_t kMatrixBytes = 64;
+
+constexpr float kPi = 3.14159265358979323846f;
+
+void multiplyRight(
+    Matrix4& matrix,
+    const Matrix4& right
 ) noexcept {
-    pushFn_ = push;
-    popFn_ = pop;
-    translateFn_ = translate;
-    rotateFn_ = rotate;
-    scaleFn_ = scale;
+    Matrix4 out{};
 
-    levi::core::Logger::info(
-        "MatrixStack native bridge bound"
-    );
-}
+    for (int column = 0; column < 4; ++column) {
+        for (int row = 0; row < 4; ++row) {
+            float value = 0.0f;
 
-bool MatrixStack::bound() noexcept {
-    return
-        pushFn_ != nullptr &&
-        popFn_ != nullptr &&
-        translateFn_ != nullptr &&
-        rotateFn_ != nullptr &&
-        scaleFn_ != nullptr;
-}
+            for (int k = 0; k < 4; ++k) {
+                value +=
+                    matrix.m[k * 4 + row] *
+                    right.m[column * 4 + k];
+            }
 
-void MatrixStack::push() noexcept {
-    if (!valid() || pushFn_ == nullptr) {
-        return;
+            out.m[column * 4 + row] = value;
+        }
     }
 
-    pushFn_(
-        reinterpret_cast<void*>(address_)
+    matrix = out;
+}
+
+Matrix4 identity() noexcept {
+    Matrix4 result{};
+
+    result.m[0] = 1.0f;
+    result.m[5] = 1.0f;
+    result.m[10] = 1.0f;
+    result.m[15] = 1.0f;
+
+    return result;
+}
+
+void translate(
+    Matrix4& matrix,
+    float x,
+    float y,
+    float z
+) noexcept {
+    Matrix4 transform = identity();
+
+    transform.m[12] = x;
+    transform.m[13] = y;
+    transform.m[14] = z;
+
+    multiplyRight(
+        matrix,
+        transform
     );
 }
 
-void MatrixStack::pop() noexcept {
-    if (!valid() || popFn_ == nullptr) {
-        return;
+void scale(
+    Matrix4& matrix,
+    float x,
+    float y,
+    float z
+) noexcept {
+    Matrix4 transform = identity();
+
+    transform.m[0] = x;
+    transform.m[5] = y;
+    transform.m[10] = z;
+
+    multiplyRight(
+        matrix,
+        transform
+    );
+}
+
+void rotateX(
+    Matrix4& matrix,
+    float degrees
+) noexcept {
+    const float radians =
+        degrees * kPi / 180.0f;
+
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
+
+    Matrix4 transform = identity();
+
+    transform.m[5] = c;
+    transform.m[6] = s;
+    transform.m[9] = -s;
+    transform.m[10] = c;
+
+    multiplyRight(
+        matrix,
+        transform
+    );
+}
+
+void rotateY(
+    Matrix4& matrix,
+    float degrees
+) noexcept {
+    const float radians =
+        degrees * kPi / 180.0f;
+
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
+
+    Matrix4 transform = identity();
+
+    transform.m[0] = c;
+    transform.m[2] = -s;
+    transform.m[8] = s;
+    transform.m[10] = c;
+
+    multiplyRight(
+        matrix,
+        transform
+    );
+}
+
+void rotateZ(
+    Matrix4& matrix,
+    float degrees
+) noexcept {
+    const float radians =
+        degrees * kPi / 180.0f;
+
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
+
+    Matrix4 transform = identity();
+
+    transform.m[0] = c;
+    transform.m[1] = s;
+    transform.m[4] = -s;
+    transform.m[5] = c;
+
+    multiplyRight(
+        matrix,
+        transform
+    );
+}
+
+} // namespace
+
+MatrixStack MatrixStack::fromRenderContext(
+    void* renderContext
+) noexcept {
+    if (renderContext == nullptr) {
+        return {};
     }
 
-    popFn_(
-        reinterpret_cast<void*>(address_)
-    );
-}
+    const auto context =
+        reinterpret_cast<std::uintptr_t>(
+            renderContext
+        );
 
-void MatrixStack::translate(
-    const levi::math::Vec3& value
-) noexcept {
-    if (!valid() || translateFn_ == nullptr) {
-        return;
+    const auto wrapper =
+        *reinterpret_cast<
+            const std::uintptr_t*
+        >(
+            context +
+            kRenderContextMatrixStackWrapper
+        );
+
+    if (wrapper == 0) {
+        return {};
     }
 
-    translateFn_(
-        reinterpret_cast<void*>(address_),
-        value.x,
-        value.y,
-        value.z
-    );
+    const auto stack =
+        *reinterpret_cast<
+            const std::uintptr_t*
+        >(
+            wrapper +
+            kWrapperMatrixStack
+        );
+
+    return MatrixStack(stack);
 }
 
-void MatrixStack::rotate(
-    const levi::math::Vec3& value
-) noexcept {
-    if (!valid() || rotateFn_ == nullptr) {
-        return;
-    }
-
-    rotateFn_(
-        reinterpret_cast<void*>(address_),
-        value.x,
-        value.y,
-        value.z
-    );
-}
-
-void MatrixStack::scale(
-    const levi::math::Vec3& value
-) noexcept {
-    if (!valid() || scaleFn_ == nullptr) {
-        return;
-    }
-
-    scaleFn_(
-        reinterpret_cast<void*>(address_),
-        value.x,
-        value.y,
-        value.z
-    );
-}
-
-void MatrixStack::apply(
-    const levi::math::Transform& transform
-) noexcept {
+Matrix4* MatrixStack::current() const noexcept {
     if (!valid()) {
-        return;
+        return nullptr;
+    }
+
+    auto* blocks =
+        *reinterpret_cast<
+            std::uintptr_t**
+        >(
+            address_ +
+            kBlocksOffset
+        );
+
+    const auto start =
+        *reinterpret_cast<
+            const std::size_t*
+        >(
+            address_ +
+            kStartOffset
+        );
+
+    const auto size =
+        *reinterpret_cast<
+            const std::size_t*
+        >(
+            address_ +
+            kSizeOffset
+        );
+
+    if (
+        blocks == nullptr ||
+        size == 0
+    ) {
+        return nullptr;
     }
 
     /*
-     * ViewModel transform order:
-     *
-     * pivot
-     *   ↓
-     * translation
-     *   ↓
-     * rotation
-     *   ↓
-     * scale
-     *   ↓
-     * inverse pivot
-     *
-     * This keeps the transformation local to the
-     * current MatrixStack frame.
+     * Same MatrixStack indexing used by the working
+     * BedrockTools ViewModel.
      */
+    const std::size_t last =
+        start + size - 1;
 
-    const bool hasPivot =
-        transform.pivot.x != 0.0f ||
-        transform.pivot.y != 0.0f ||
-        transform.pivot.z != 0.0f;
+    const std::size_t blockOffset =
+        (last >> 3) &
+        ~static_cast<std::size_t>(7);
 
-    if (hasPivot) {
-        translate(transform.pivot);
+    const std::size_t elementIndex =
+        last & 0x3F;
+
+    const auto block =
+        *reinterpret_cast<
+            const std::uintptr_t*
+        >(
+            reinterpret_cast<
+                std::uintptr_t
+            >(blocks) +
+            blockOffset
+        );
+
+    if (block == 0) {
+        return nullptr;
     }
 
-    translate(transform.translation);
+    return reinterpret_cast<Matrix4*>(
+        block +
+        elementIndex *
+            kMatrixBytes
+    );
+}
 
-    rotate(transform.rotation);
+bool MatrixStack::snapshot(
+    Matrix4& out
+) const noexcept {
+    const auto* matrix = current();
 
-    scale(transform.scale);
+    if (matrix == nullptr) {
+        return false;
+    }
 
-    if (hasPivot) {
+    std::memcpy(
+        &out,
+        matrix,
+        sizeof(Matrix4)
+    );
+
+    return true;
+}
+
+bool MatrixStack::restore(
+    const Matrix4& value
+) const noexcept {
+    auto* matrix = current();
+
+    if (matrix == nullptr) {
+        return false;
+    }
+
+    std::memcpy(
+        matrix,
+        &value,
+        sizeof(Matrix4)
+    );
+
+    return true;
+}
+
+bool MatrixStack::apply(
+    const levi::math::Transform& transform
+) const noexcept {
+    auto* matrix = current();
+
+    if (matrix == nullptr) {
+        return false;
+    }
+
+    if (
+        transform.translation.x != 0.0f ||
+        transform.translation.y != 0.0f ||
+        transform.translation.z != 0.0f
+    ) {
         translate(
-            transform.pivot * -1.0f
+            *matrix,
+            transform.translation.x,
+            transform.translation.y,
+            transform.translation.z
         );
     }
+
+    const bool hasRotation =
+        transform.rotation.x != 0.0f ||
+        transform.rotation.y != 0.0f ||
+        transform.rotation.z != 0.0f;
+
+    if (hasRotation) {
+        const bool hasPivot =
+            transform.pivot.x != 0.0f ||
+            transform.pivot.y != 0.0f ||
+            transform.pivot.z != 0.0f;
+
+        if (hasPivot) {
+            translate(
+                *matrix,
+                transform.pivot.x,
+                transform.pivot.y,
+                transform.pivot.z
+            );
+        }
+
+        if (transform.rotation.x != 0.0f) {
+            rotateX(
+                *matrix,
+                transform.rotation.x
+            );
+        }
+
+        if (transform.rotation.y != 0.0f) {
+            rotateY(
+                *matrix,
+                transform.rotation.y
+            );
+        }
+
+        if (transform.rotation.z != 0.0f) {
+            rotateZ(
+                *matrix,
+                transform.rotation.z
+            );
+        }
+
+        if (hasPivot) {
+            translate(
+                *matrix,
+                -transform.pivot.x,
+                -transform.pivot.y,
+                -transform.pivot.z
+            );
+        }
+    }
+
+    if (
+        transform.scale.x != 1.0f ||
+        transform.scale.y != 1.0f ||
+        transform.scale.z != 1.0f
+    ) {
+        scale(
+            *matrix,
+            transform.scale.x,
+            transform.scale.y,
+            transform.scale.z
+        );
+    }
+
+    return true;
 }
 
 } // namespace levi::minecraft
