@@ -15,7 +15,6 @@ public:
     static constexpr const char* kVersion =
         "1.26.44.3";
 
-public:
     static bool resolve(
         MinecraftTargets& targets
     ) noexcept;
@@ -25,18 +24,27 @@ public:
     static bool supported() noexcept;
 
 private:
-    static std::uintptr_t
-    resolveSetupAndRender(
+    static std::uintptr_t resolveRenderItem(
         const memory::MemoryRange& text
     ) noexcept;
 
-    static std::uintptr_t
-    resolveRenderItemGroup(
+    static std::uintptr_t resolveGetFov(
         const memory::MemoryRange& text
     ) noexcept;
 
-    static std::uintptr_t
-    resolveItemInHandRenderer(
+    static std::uintptr_t resolveGetPerspective(
+        const memory::MemoryRange& text
+    ) noexcept;
+
+    static std::uintptr_t resolveLocalPlayerApplyTurnDelta(
+        const memory::MemoryRange& text
+    ) noexcept;
+
+    static std::uintptr_t resolveSetupAndRender(
+        const memory::MemoryRange& text
+    ) noexcept;
+
+    static std::uintptr_t resolveRenderItemGroup(
         const memory::MemoryRange& text
     ) noexcept;
 };
